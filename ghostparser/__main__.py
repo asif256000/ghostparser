@@ -1,13 +1,27 @@
-"""Entry point for the ghostparser module."""
+"""Entry point for the ghostparser package.
 
-from ghostparser.parser import generate_response
+This module allows the package to be executed with `python -m ghostparser`.
+For tree parsing functionality, use `python -m ghostparser.tree_parser`.
+"""
+
+import sys
 
 
 def main():
-    """Main entry point for the ghostparser module."""
-    user_input = input("Enter your input: ")
-    response = generate_response(user_input)
-    print(response)
+    """Display usage information for the ghostparser package."""
+    print("GhostParser")
+    print()
+    print("Available modules:")
+    print("  tree_parser    - Parse and standardize Newick format trees")
+    print()
+    print("Usage:")
+    print("  python -m ghostparser.tree_parser -st <species_tree> -gt <gene_trees> -og <outgroup>")
+    print()
+    print("Example:")
+    print("  python -m ghostparser.tree_parser -st species.nwk -gt genes.nwk -og Outgroup1")
+    print()
+    print("For more information, run:")
+    print("  python -m ghostparser.tree_parser --help")
 
 
 if __name__ == "__main__":
