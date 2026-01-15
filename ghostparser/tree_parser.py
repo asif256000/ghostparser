@@ -2,16 +2,17 @@
 
 import argparse
 from io import StringIO
+from itertools import combinations
 from pathlib import Path
 
 from Bio import Phylo
 
 
 def read_tree_file(filepath):
-    """Read Newick format trees from a file using BioPython.
+    """Read Newick trees from a file.
 
     Args:
-        filepath: Path to the Newick format tree file.
+        filepath: Path to the Newick tree file.
 
     Returns:
         A list of Bio.Phylo tree objects.
@@ -23,12 +24,20 @@ def read_tree_file(filepath):
     try:
         trees = list(Phylo.parse(filepath, "newick"))
         if not trees:
-            raise ValueError(f"No valid trees found in {filepath}")
+            raise ValueError(f"Invalid Newick format in {filepath}")
+        # Validate that each tree has at least one terminal (leaf node)
+        for idx, tree in enumerate(trees, start=1):
+            if not tree.get_terminals():
+                raise ValueError(f"Invalid Newick format in {filepath}: Tree {idx} has no terminal nodes")
         return trees
     except FileNotFoundError:
         raise FileNotFoundError(f"Tree file not found: {filepath}")
+    except ValueError:
+        # Re-raise ValueError as-is (our own validation errors)
+        raise
     except Exception as e:
-        raise ValueError(f"Error parsing tree file {filepath}: {e}")
+        # Catch any parsing errors from BioPython
+        raise ValueError(f"Invalid Newick format in {filepath}: {e}")
 
 
 def calculate_average_support(tree):
@@ -202,6 +211,145 @@ def get_clean_filename(filepath):
     return str(path.parent / f"{path.stem}_clean{path.suffix}")
 
 
+def get_taxa_from_tree(tree):
+    """Extract all terminal taxa names from a phylogenetic tree.
+
+    Args:
+        tree: A Bio.Phylo tree object.
+
+    Returns:
+        A sorted list of terminal taxa names.
+    """
+    taxa = [terminal.name for terminal in tree.get_terminals()]
+    return sorted(taxa)
+
+
+def generate_triplets(taxa_list, outgroup):
+    """Generate all unique triplet combinations from taxa excluding the outgroup.
+
+    Args:
+        taxa_list: List of all taxa names.
+        outgroup: The outgroup taxon to exclude.
+
+    Returns:
+        A list of tuples, where each tuple contains 3 taxa names.
+    """
+    # Remove outgroup from taxa list
+    ingroup_taxa = [taxon for taxon in taxa_list if taxon != outgroup]
+
+    # Generate all possible triplet combinations
+    triplets = list(combinations(ingroup_taxa, 3))
+
+    return triplets
+
+
+def write_triplets_to_file(triplets, output_filepath):
+    """Write triplets to a file, one triplet per line.
+
+    Args:
+        triplets: List of triplet tuples.
+        output_filepath: Path where the triplets will be written.
+    """
+    with open(output_filepath, "w") as f:
+        for triplet in triplets:
+            f.write(",".join(triplet) + "\n")
+
+
+def extract_triplet_subtree(tree, triplet_taxa):
+    """Extract a subtree containing only the specified triplet taxa.
+
+    Args:
+        tree: A Bio.Phylo tree object.
+        triplet_taxa: List or tuple of 3 taxa names to extract.
+
+    Returns:
+        A new Bio.Phylo tree containing only the specified taxa, or None if not all taxa are present.
+    """
+    # Get all terminal names in the tree
+    tree_taxa = {terminal.name for terminal in tree.get_terminals()}
+
+    # Check if all triplet taxa are present in the tree
+    if not all(taxon in tree_taxa for taxon in triplet_taxa):
+        return None
+
+    # Create a copy of the tree to avoid modifying the original
+    import copy
+
+    subtree = copy.deepcopy(tree)
+
+    # Get all terminals to remove (all except our triplet)
+    terminals_to_remove = [t.name for t in subtree.get_terminals() if t.name not in triplet_taxa]
+
+    # Prune away unwanted terminals
+    for terminal_name in terminals_to_remove:
+        # Find the terminal in the tree
+        for terminal in subtree.get_terminals():
+            if terminal.name == terminal_name:
+                subtree.prune(terminal)
+                break
+
+    return subtree
+
+
+def process_gene_trees_for_triplets(gene_trees, triplets):
+    """Process gene trees to extract subtrees for each triplet.
+
+    Args:
+        gene_trees: List of Bio.Phylo tree objects.
+        triplets: List of triplet tuples.
+
+    Returns:
+        A dictionary mapping triplets to lists of subtree Newick strings.
+    """
+    triplet_gene_trees = {triplet: [] for triplet in triplets}
+
+    for gene_tree in gene_trees:
+        for triplet in triplets:
+            subtree = extract_triplet_subtree(gene_tree, triplet)
+            if subtree:
+                # Convert to Newick string using our custom formatting
+                newick_str = format_newick_with_precision(subtree)
+                triplet_gene_trees[triplet].append(newick_str)
+
+    return triplet_gene_trees
+
+
+def write_triplet_gene_trees(triplet_gene_trees, output_filepath):
+    """Write triplet gene trees to a file in the specified format.
+
+    Format:
+    TaxonA,TaxonB,TaxonC<tab><count>
+    <blank line>
+    newick_tree_1
+    newick_tree_2
+    ...
+    <blank line>
+    <blank line>
+    NextTriplet...
+
+    Args:
+        triplet_gene_trees: Dictionary mapping triplets to lists of Newick strings.
+        output_filepath: Path where the results will be written.
+    """
+    with open(output_filepath, "w") as f:
+        for i, (triplet, newick_trees) in enumerate(triplet_gene_trees.items()):
+            # Write header line: triplet and count
+            triplet_str = ",".join(triplet)
+            count = len(newick_trees)
+            f.write(f"{triplet_str}\t{count}\n")
+
+            # Write blank line
+            f.write("\n")
+
+            # Write all Newick trees for this triplet
+            for newick in newick_trees:
+                f.write(f"{newick}\n")
+
+            # Write two blank lines between triplets (except after the last one)
+            if i < len(triplet_gene_trees) - 1:
+                f.write("\n\n")
+
+
 def main():
     """Main entry point for the tree parser module."""
     parser = argparse.ArgumentParser(
@@ -227,7 +375,7 @@ def main():
         print(f"Error: Gene trees file not found: {args.gene_trees}")
         return
 
-    # Get output filenames (keep them relative)
+    # Get output filenames
     species_tree_clean = get_clean_filename(str(species_tree_path))
     gene_trees_clean = get_clean_filename(str(gene_trees_path))
 
@@ -237,7 +385,7 @@ def main():
     print("Support threshold: 0.5")
     print()
 
-    # Clean and save species tree
+    # Clean and save species tree, then re-read from *_clean file for downstream steps
     try:
         species_trees, dropped_species = clean_and_save_trees(str(species_tree_path), species_tree_clean)
         print(f"✓ Species tree cleaned and saved to: {species_tree_clean}")
@@ -246,21 +394,74 @@ def main():
             print(f"  ⚠ Dropped {len(dropped_species)} tree(s) with avg support < 0.5:")
             for idx, avg_support in dropped_species.items():
                 print(f"    - Index {idx} from {args.species_tree} (avg support: {avg_support:.4f})")
+
+        # Always use the cleaned file for subsequent processing
+        species_trees = read_tree_file(species_tree_clean)
     except Exception as e:
         print(f"✗ Error processing species tree: {e}")
         return
 
-    # Clean and save gene trees
+    # Generate triplets from species tree
+    try:
+        # Get taxa from the first species tree
+        if species_trees:
+            taxa = get_taxa_from_tree(species_trees[0])
+            print(f"\n✓ Found {len(taxa)} taxa in species tree")
+
+            # Check if outgroup exists in taxa
+            if args.outgroup not in taxa:
+                print(f"⚠ Warning: Outgroup '{args.outgroup}' not found in species tree taxa")
+                print(f"  Available taxa: {', '.join(taxa)}")
+            else:
+                # Generate triplets excluding outgroup
+                triplets = generate_triplets(taxa, args.outgroup)
+
+                print(f"✓ Generated {len(triplets)} unique triplets")
+                print(f"  ({len(taxa) - 1} taxa choose 3 = {len(triplets)} combinations)")
+    except Exception as e:
+        print(f"✗ Error generating triplets: {e}")
+        return
+
+    # Clean and save gene trees, then re-read from *_clean file for downstream steps
     try:
         gene_trees, dropped_genes = clean_and_save_trees(str(gene_trees_path), gene_trees_clean)
-        print(f"✓ Gene trees cleaned and saved to: {gene_trees_clean}")
+        print(f"\n✓ Gene trees cleaned and saved to: {gene_trees_clean}")
         print(f"  Processed {len(gene_trees)} tree(s)")
         if dropped_genes:
             print(f"  ⚠ Dropped {len(dropped_genes)} tree(s) with avg support < 0.5:")
             for idx, avg_support in dropped_genes.items():
                 print(f"    - Index {idx} from {args.gene_trees} (avg support: {avg_support:.4f})")
+
+        # Always use the cleaned file for subsequent processing
+        gene_trees = read_tree_file(gene_trees_clean)
     except Exception as e:
         print(f"✗ Error processing gene trees: {e}")
+        return
+
+    # Process gene trees for triplets
+    try:
+        print("\n✓ Processing gene trees for triplets...")
+        triplet_gene_trees = process_gene_trees_for_triplets(gene_trees, triplets)
+
+        # Generate output filename for triplet gene trees
+        triplet_output_path = str(species_tree_path.parent / f"{species_tree_path.stem}_unique_triplet_gene_trees.txt")
+
+        # Write results to file
+        write_triplet_gene_trees(triplet_gene_trees, triplet_output_path)
+
+        # Print statistics
+        total_subtrees = sum(len(trees) for trees in triplet_gene_trees.values())
+        triplets_with_trees = sum(1 for trees in triplet_gene_trees.values() if trees)
+
+        print(f"✓ Triplet gene trees saved to: {triplet_output_path}")
+        print(f"  Total triplets: {len(triplets)}")
+        print(f"  Triplets with gene trees: {triplets_with_trees}")
+        print(f"  Total subtrees extracted: {total_subtrees}")
+        if triplets_with_trees > 0:
+            avg_trees_per_triplet = total_subtrees / triplets_with_trees
+            print(f"  Average trees per triplet: {avg_trees_per_triplet:.2f}")
+    except Exception as e:
+        print(f"✗ Error processing triplet gene trees: {e}")
         return
 
     print("\nProcessing complete!")
