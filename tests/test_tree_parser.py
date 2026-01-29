@@ -15,12 +15,14 @@ from ghostparser.tree_parser import (
     generate_triplets,
     get_clean_filename,
     get_taxa_from_tree,
+    MetricsLogger,
     process_gene_trees_for_triplets,
     read_tree_file,
     remove_support_values,
     standardize_tree,
     write_clean_trees,
     write_triplet_gene_trees,
+    write_triplet_gene_trees_multiprocess,
     write_triplets_to_file,
 )
 
@@ -669,9 +671,9 @@ def test_write_triplet_gene_trees(tmp_path):
     # Check second tree
     assert "TaxaA:0.15,TaxaB:0.25,TaxaC:0.35" in lines[3]
 
-    # Check double blank lines between triplets
+    # Check separator line format: blank line then separator
     assert lines[4] == ""
-    assert lines[5] == ""
+    assert lines[5] == "=" * 60
 
     # Check second triplet header
     assert "TaxaD,TaxaE,TaxaF\t1" in lines[6]
@@ -738,3 +740,160 @@ def test_integration_full_triplet_extraction_workflow(tmp_path):
 
     # Check that counts are present
     assert "\t" in content  # Tab-separated counts
+
+
+def test_write_triplet_gene_trees_multiprocess_single_worker(tmp_path):
+    """Test multiprocessing triplet writer with multiprocessing disabled."""
+    triplets = [("TaxaA", "TaxaB", "TaxaC"), ("TaxaD", "TaxaE", "TaxaF")]
+    gene_trees_newick = [
+        "((TaxaA:0.1,TaxaB:0.2):0.3,TaxaC:0.4);",
+        "((TaxaD:0.5,TaxaE:0.6):0.7,TaxaF:0.8);",
+    ]
+
+    output_file = tmp_path / "triplet_gene_trees_mp.txt"
+
+    total_subtrees, triplets_with_trees, worker_count = write_triplet_gene_trees_multiprocess(
+        triplets,
+        gene_trees_newick,
+        str(output_file),
+        use_multiprocessing=False,  # Disable multiprocessing
+    )
+
+    # Verify output file exists
+    assert output_file.exists()
+
+    # Verify worker count is 1 when multiprocessing is disabled
+    assert worker_count == 1
+
+    # Verify statistics
+    assert triplets_with_trees > 0
+    assert total_subtrees > 0
+
+    # Verify file content
+    content = output_file.read_text()
+    assert "TaxaA,TaxaB,TaxaC" in content
+    assert "TaxaD,TaxaE,TaxaF" in content
+
+
+def test_write_triplet_gene_trees_multiprocess_with_workers(tmp_path):
+    """Test multiprocessing triplet writer with multiple workers."""
+    triplets = [("TaxaA", "TaxaB", "TaxaC"), ("TaxaD", "TaxaE", "TaxaF")]
+    gene_trees_newick = [
+        "((TaxaA:0.1,TaxaB:0.2):0.3,TaxaC:0.4);",
+        "((TaxaD:0.5,TaxaE:0.6):0.7,TaxaF:0.8);",
+    ]
+
+    output_file = tmp_path / "triplet_gene_trees_mp.txt"
+
+    total_subtrees, triplets_with_trees, worker_count = write_triplet_gene_trees_multiprocess(
+        triplets,
+        gene_trees_newick,
+        str(output_file),
+        use_multiprocessing=True,
+        processes=2,
+    )
+
+    # Verify output file exists
+    assert output_file.exists()
+
+    # Verify worker count is 2
+    assert worker_count == 2
+
+    # Verify statistics
+    assert triplets_with_trees > 0
+    assert total_subtrees > 0
+
+    # Verify file content
+    content = output_file.read_text()
+    assert "TaxaA,TaxaB,TaxaC" in content
+    assert "TaxaD,TaxaE,TaxaF" in content
+
+
+def test_metrics_logger_context_manager(tmp_path):
+    """Test MetricsLogger as a context manager."""
+    metrics_file = tmp_path / "metrics.txt"
+
+    with MetricsLogger(str(metrics_file)) as metrics:
+        metrics.log("Test message 1")
+        metrics.log("Test message 2")
+        assert metrics.metrics_file is not None  # File should be open
+
+    # File should be closed after exiting context
+    assert metrics.metrics_file.closed
+
+    # Verify file content
+    content = metrics_file.read_text()
+    assert "Test message 1" in content
+    assert "Test message 2" in content
+
+
+def test_metrics_logger_file_not_opened_before_enter(tmp_path):
+    """Test that MetricsLogger doesn't open file until __enter__."""
+    metrics_file = tmp_path / "metrics.txt"
+
+    logger = MetricsLogger(str(metrics_file))
+    # File should not exist yet
+    assert not metrics_file.exists()
+    assert logger.metrics_file is None
+
+    # After entering context, file should exist
+    with logger:
+        assert logger.metrics_file is not None
+
+
+def test_triplet_gene_trees_separator_format(tmp_path):
+    """Test that separator lines are correctly formatted between triplets."""
+    triplet_gene_trees = {
+        ("TaxaA", "TaxaB", "TaxaC"): ["(TaxaA:0.1,TaxaB:0.2,TaxaC:0.3);"],
+        ("TaxaD", "TaxaE", "TaxaF"): ["(TaxaD:0.4,TaxaE:0.5,TaxaF:0.6);"],
+        ("TaxaG", "TaxaH", "TaxaI"): ["(TaxaG:0.7,TaxaH:0.8,TaxaI:0.9);"],
+    }
+
+    output_file = tmp_path / "triplet_gene_trees.txt"
+    write_triplet_gene_trees(triplet_gene_trees, str(output_file))
+
+    content = output_file.read_text()
+    lines = content.split("\n")
+
+    # Count separator lines
+    separator_count = sum(1 for line in lines if line == "=" * 60)
+
+    # Should have 2 separators between 3 triplets
+    assert separator_count == 2
+
+    # Verify separator format: blank line, separator, next triplet
+    for i, line in enumerate(lines):
+        if line == "=" * 60:
+            # Before separator should be blank line or tree content
+            # After separator should be next triplet header or content
+            if i > 0:
+                assert lines[i - 1] == "" or ")" in lines[i - 1]  # Blank or tree line
+            if i + 1 < len(lines):
+                # Next line could be another header or blank
+                assert lines[i + 1] == "" or "," in lines[i + 1]  # Blank or triplet header
+
+
+def test_multiprocessing_triplet_writer_handles_empty_triplets(tmp_path):
+    """Test that multiprocessing writer handles empty triplets correctly."""
+    triplets = [("TaxaA", "TaxaB", "TaxaC"), ("TaxaX", "TaxaY", "TaxaZ")]
+    gene_trees_newick = [
+        "((TaxaA:0.1,TaxaB:0.2):0.3,TaxaC:0.4);",
+        # TaxaX, TaxaY, TaxaZ not present in any gene tree
+    ]
+
+    output_file = tmp_path / "triplet_gene_trees_empty.txt"
+
+    total_subtrees, triplets_with_trees, worker_count = write_triplet_gene_trees_multiprocess(
+        triplets,
+        gene_trees_newick,
+        str(output_file),
+        use_multiprocessing=False,
+    )
+
+    # Verify that triplets with no matching trees are still written
+    content = output_file.read_text()
+    assert "TaxaX,TaxaY,TaxaZ\t0" in content
+
+    # Only one triplet should have trees
+    assert triplets_with_trees == 1
+    assert total_subtrees > 0
