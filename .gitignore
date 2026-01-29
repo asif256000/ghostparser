@@ -24,4 +24,9 @@ venv/
 # Phylogenetic analysis outputs
 *.nwk
 *.tree
+*.trees
 *.txt
+*.out
+
+# Scripts
+ghostparser*.sh
