@@ -26,9 +26,16 @@ python -m ghostparser.tree_parser -st species.tree -gt genes.tree -og OutGroup
 
 ### Arguments
 
-- `-st, --species_tree`: Path to the species tree file in Newick format (required)
-- `-gt, --gene_trees`: Path to the gene trees file in Newick format (required)
-- `-og, --outgroup`: Outgroup species identifier (required)
+**Required:**
+- `-st, --species_tree`: Path to the species tree file in Newick format
+- `-gt, --gene_trees`: Path to the gene trees file in Newick format
+- `-og, --outgroup`: Outgroup species identifier
+
+**Optional:**
+- `-p, --processes`: Number of worker processes for multiprocessing (only used with `-p/--processes`).
+                    Defaults to cpu_count(). Ignored if `--no-multiprocessing` is set.
+- `--no-multiprocessing`: Disable multiprocessing. Processes triplets sequentially using a single worker.
+                         Useful for debugging or on systems with limited resources.
 
 ## Output Files
 
@@ -58,7 +65,7 @@ The tool generates three output files:
 python -m ghostparser.tree_parser -st species.tree -gt genes.tree -og OutGroup
 ```
 
-**Output** (`species_unique_triplet_gene_trees.txt`):
+**Output** (`genes_unique_triplet_gene_trees.txt`):
 
 ```
 TaxaA,TaxaB,TaxaC	2
