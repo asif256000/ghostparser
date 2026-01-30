@@ -55,6 +55,17 @@ def _chunk_list(items, chunk_size):
         yield items[i : i + chunk_size]
 
 
+def _get_mp_context():
+    """Get a multiprocessing context that avoids fork in multi-threaded processes."""
+    if hasattr(mp, "get_context"):
+        methods = mp.get_all_start_methods()
+        if "forkserver" in methods:
+            return mp.get_context("forkserver")
+        if "spawn" in methods:
+            return mp.get_context("spawn")
+    return mp
+
+
 def calculate_average_support(tree):
     """Calculate the average support value for a tree.
 
@@ -313,23 +324,12 @@ def _extract_triplet_subtree(tree, triplet_taxa, tree_taxa=None):
 
 
 _TRIPLET_SET = None
-_GENE_TREE_NEWICKS = None
-_OUTPUT_PATH = None
-_OUTPUT_LOCK = None
 
 
 def _init_triplet_worker(triplet_set):
     """Initializer for multiprocessing workers."""
     global _TRIPLET_SET
     _TRIPLET_SET = triplet_set
-
-
-def _init_triplet_writer(gene_tree_newicks, output_path, lock):
-    """Initializer for multiprocessing writers."""
-    global _GENE_TREE_NEWICKS, _OUTPUT_PATH, _OUTPUT_LOCK
-    _GENE_TREE_NEWICKS = gene_tree_newicks
-    _OUTPUT_PATH = output_path
-    _OUTPUT_LOCK = lock
 
 
 def _process_single_gene_tree(newick_str):
@@ -350,51 +350,13 @@ def _process_single_gene_tree(newick_str):
     return results
 
 
-def _process_triplet_chunk(triplet_chunk):
-    """Process a chunk of triplets against all gene trees and append results to file."""
-    triplet_results = {triplet: [] for triplet in triplet_chunk}
-
-    for newick_str in _GENE_TREE_NEWICKS:
-        tree = Phylo.read(StringIO(newick_str), "newick")
-        tree_taxa = {terminal.name for terminal in tree.get_terminals()}
-        for triplet in triplet_chunk:
-            if not set(triplet).issubset(tree_taxa):
-                continue
-            subtree = _extract_triplet_subtree(tree, triplet, tree_taxa=tree_taxa)
-            if subtree:
-                newick = format_newick_with_precision(subtree)
-                triplet_results[triplet].append(newick)
-
-    total_subtrees = 0
-    triplets_with_trees = 0
-    output_lines = []
-    for i, triplet in enumerate(triplet_chunk):
-        newick_trees = triplet_results[triplet]
-        count = len(newick_trees)
-        total_subtrees += count
-        if count > 0:
-            triplets_with_trees += 1
-
-        output_lines.append(",".join(triplet) + f"\t{count}")
-        output_lines.append("")
-        for newick in newick_trees:
-            output_lines.append(newick)
-        if i < len(triplet_chunk) - 1:
-            output_lines.append("")
-            output_lines.append("=" * 60)
-            output_lines.append("")
-
-    output_block = "\n".join(output_lines) + "\n"
-
-    if _OUTPUT_LOCK is not None:
-        with _OUTPUT_LOCK:
-            with open(_OUTPUT_PATH, "a") as f:
-                f.write(output_block)
-    else:
-        with open(_OUTPUT_PATH, "a") as f:
-            f.write(output_block)
-
-    return total_subtrees, triplets_with_trees
+def _calculate_worker_count(total_items, use_multiprocessing, processes):
+    """Calculate worker count based on multiprocessing flag and available items."""
+    if not use_multiprocessing:
+        return 1
+    available_cpus = cpu_count()
+    worker_count = processes or available_cpus
+    return max(1, min(worker_count, total_items))
 
 
 def process_gene_trees_for_triplets(gene_trees, triplets, use_multiprocessing=True, processes=None, chunksize=None):
@@ -440,7 +402,7 @@ def process_gene_trees_for_triplets(gene_trees, triplets, use_multiprocessing=Tr
         if chunksize is None:
             chunksize = max(1, len(gene_tree_newicks) // (worker_count * 4))
 
-        ctx = mp.get_context("fork") if hasattr(mp, "get_context") else mp
+        ctx = _get_mp_context()
         with ctx.Pool(processes=worker_count, initializer=_init_triplet_worker, initargs=(triplet_set,)) as pool:
             for result in pool.imap(_process_single_gene_tree, gene_tree_newicks, chunksize=chunksize):
                 for triplet, newick in result:
@@ -474,10 +436,9 @@ def write_triplet_gene_trees_multiprocess(
     processes=None,
     chunksize=None,
 ):
-    """Write triplet gene trees using multiprocessing without storing full results in memory.
+    """Write triplet gene trees using multiprocessing over gene trees.
 
-    Distributes triplet chunks across workers for parallel processing.
-    Each worker writes results directly to output file using a lock.
+    Parallelizes across gene trees to avoid being bounded by the number of triplets.
 
     Args:
         triplets: List of triplet tuples to process.
@@ -487,49 +448,47 @@ def write_triplet_gene_trees_multiprocess(
                            If False, processes sequentially on single worker.
         processes: Number of worker processes when multiprocessing is enabled.
                    Defaults to cpu_count(). Only used if use_multiprocessing=True.
-        chunksize: Chunk size for triplet distribution to workers.
+        chunksize: Chunk size for gene tree distribution to workers.
                    Only used if use_multiprocessing=True.
 
     Returns:
         Tuple of (total_subtrees, triplets_with_trees, worker_count).
     """
-    # Truncate output file before appending from workers
+    # Truncate output file before writing results
     with open(output_filepath, "w") as f:
         f.write("")
 
-    if not triplets:
+    if not triplets or not gene_tree_newicks:
         return 0, 0, 0
 
-    # Calculate worker count based on multiprocessing flag
-    if use_multiprocessing:
-        available_cpus = cpu_count()
-        worker_count = processes or available_cpus
-        worker_count = max(1, min(worker_count, len(triplets)))
-    else:
-        worker_count = 1
+    worker_count = _calculate_worker_count(
+        len(gene_tree_newicks),
+        use_multiprocessing=use_multiprocessing,
+        processes=processes,
+    )
 
     if chunksize is None:
-        chunksize = max(1, len(triplets) // (worker_count * 4))
+        chunksize = max(1, len(gene_tree_newicks) // (worker_count * 4))
 
-    triplet_chunks = list(_chunk_list(triplets, chunksize))
+    triplet_set = set(triplets)
+    triplet_gene_trees = {triplet: [] for triplet in triplets}
 
     if use_multiprocessing and worker_count > 1:
-        ctx = mp.get_context("fork") if hasattr(mp, "get_context") else mp
-        manager = ctx.Manager()
-        lock = manager.Lock()
-
-        with ctx.Pool(
-            processes=worker_count,
-            initializer=_init_triplet_writer,
-            initargs=(gene_tree_newicks, output_filepath, lock),
-        ) as pool:
-            totals = pool.map(_process_triplet_chunk, triplet_chunks)
+        ctx = _get_mp_context()
+        with ctx.Pool(processes=worker_count, initializer=_init_triplet_worker, initargs=(triplet_set,)) as pool:
+            for result in pool.imap(_process_single_gene_tree, gene_tree_newicks, chunksize=chunksize):
+                for triplet, newick in result:
+                    triplet_gene_trees[triplet].append(newick)
     else:
-        _init_triplet_writer(gene_tree_newicks, output_filepath, None)
-        totals = [_process_triplet_chunk(chunk) for chunk in triplet_chunks]
+        _init_triplet_worker(triplet_set)
+        for newick_str in gene_tree_newicks:
+            for triplet, newick in _process_single_gene_tree(newick_str):
+                triplet_gene_trees[triplet].append(newick)
 
-    total_subtrees = sum(t[0] for t in totals)
-    triplets_with_trees = sum(t[1] for t in totals)
+    write_triplet_gene_trees(triplet_gene_trees, output_filepath)
+
+    total_subtrees = sum(len(trees) for trees in triplet_gene_trees.values())
+    triplets_with_trees = sum(1 for trees in triplet_gene_trees.values() if trees)
 
     return total_subtrees, triplets_with_trees, worker_count
 
@@ -608,6 +567,13 @@ def main():
     parser.add_argument("-gt", "--gene_trees", required=True, help="Path to the gene trees file in Newick format")
     parser.add_argument("-og", "--outgroup", required=True, help="Outgroup species identifier")
     parser.add_argument(
+        "-o",
+        "--output",
+        type=str,
+        default=None,
+        help="Output folder relative to input data folder (default: same folder as input data)",
+    )
+    parser.add_argument(
         "-p",
         "--processes",
         type=int,
@@ -635,10 +601,17 @@ def main():
         print(f"Error: Gene trees file not found: {args.gene_trees}")
         return
 
+    # Determine output directory
+    if args.output:
+        output_dir = species_tree_path.parent / args.output
+        output_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        output_dir = species_tree_path.parent
+
     # Get output filenames
-    species_tree_clean = get_clean_filename(str(species_tree_path))
-    gene_trees_clean = get_clean_filename(str(gene_trees_path))
-    metrics_filepath = str(species_tree_path.parent / f"{species_tree_path.stem}_metrics.txt")
+    species_tree_clean = str(output_dir / f"{species_tree_path.stem}_clean{species_tree_path.suffix}")
+    gene_trees_clean = str(output_dir / f"{gene_trees_path.stem}_clean{gene_trees_path.suffix}")
+    metrics_filepath = str(output_dir / f"{species_tree_path.stem}_metrics.txt")
 
     # Initialize metrics logger as context manager
     with MetricsLogger(metrics_filepath) as metrics:
@@ -711,7 +684,14 @@ def main():
             triplet_start = time.time()
 
             # Generate output filename for triplet gene trees
-            triplet_output_path = str(gene_trees_path.parent / f"{gene_trees_path.stem}_unique_triplet_gene_trees.txt")
+            triplet_output_path = str(output_dir / f"{gene_trees_path.stem}_unique_triplet_gene_trees.txt")
+
+            worker_count = _calculate_worker_count(
+                len(gene_trees),
+                use_multiprocessing=not args.no_multiprocessing,
+                processes=args.processes,
+            )
+            metrics.log(f"  Workers used: {worker_count}")
 
             total_subtrees, triplets_with_trees, worker_count = write_triplet_gene_trees_multiprocess(
                 triplets,
@@ -723,7 +703,6 @@ def main():
 
             # Print statistics
             metrics.log(f"✓ Triplet gene trees saved to: {triplet_output_path}")
-            metrics.log(f"  Workers used: {worker_count}")
             metrics.log(f"  Total triplets: {len(triplets)}")
             metrics.log(f"  Triplets with gene trees: {triplets_with_trees}")
             metrics.log(f"  Total subtrees extracted: {total_subtrees}")
