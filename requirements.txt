@@ -1,2 +1,3 @@
 biopython>=1.79
+dendropy>=4.5.2
 pytest>=7.0

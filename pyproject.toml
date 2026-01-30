@@ -8,7 +8,10 @@ version = "0.1.0"
 description = "A module for processing user input and generating responses based on predefined pipeline and logic"
 readme = "README.md"
 requires-python = ">=3.8"
-dependencies = []
+dependencies = [
+	"biopython>=1.79",
+	"dendropy>=4.5.2",
+]
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
