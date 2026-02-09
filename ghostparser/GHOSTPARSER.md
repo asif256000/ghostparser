@@ -6,6 +6,14 @@ Detailed documentation for the `ghostparser.tree_parser` module.
 
 The ghostparser module processes phylogenetic trees in Newick format, standardizes them by removing support values, filters low-quality trees, and extracts triplet subtrees from gene trees for downstream ghost introgression analysis.
 
+When multiple outgroup taxa are provided (comma-separated), the species tree is rooted on their most recent common
+ancestor (MRCA) and the outgroup clade is pruned. Any additional taxa that fall inside the outgroup clade are
+excluded from triplet generation and logged as a warning (including the full list of excluded taxa) in the metrics
+file.
+
+For very large datasets, triplet processing parallelizes over triplet chunks and streams gene trees from disk,
+keeping memory bounded to the active triplet chunk.
+
 ## Module Functions
 
 ### Tree Reading and Validation
@@ -177,23 +185,23 @@ print(f"Found taxa: {', '.join(taxa)}")
 
 #### `generate_triplets(taxa_list, outgroup)`
 
-Generate all unique triplet combinations from taxa excluding the outgroup.
+Generate all unique triplet combinations from taxa excluding the outgroup(s).
 
 **Arguments:**
 
 - `taxa_list`: List of all taxa names
-- `outgroup`: The outgroup taxon to exclude
+- `outgroup`: Outgroup taxon or iterable of taxa to exclude (comma-separated string supported)
 
 **Returns:**
 
 - A list of tuples, where each tuple contains 3 taxa names
 
-**Formula:** nC3 where n = len(taxa_list) - 1 (excluding outgroup)
+**Formula:** nC3 where n = len(taxa_list) - k (excluding k outgroup taxa)
 
 **Example:**
 
 ```python
-triplets = generate_triplets(taxa, "OutGroup")
+triplets = generate_triplets(taxa, "OutGroup1,OutGroup2")
 print(f"Generated {len(triplets)} triplets")
 ```
 
