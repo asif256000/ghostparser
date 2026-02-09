@@ -1,15 +1,13 @@
-"""Tree parsing and standardization module using BioPython."""
+"""Tree parsing and standardization module."""
 
 import argparse
-from io import StringIO
 from itertools import combinations
 from multiprocessing import cpu_count
 import multiprocessing as mp
 from pathlib import Path
 import time
 
-from Bio import Phylo
-from Bio.Phylo.BaseTree import Clade, Tree
+import dendropy
 
 
 def read_tree_file(filepath):
@@ -19,35 +17,26 @@ def read_tree_file(filepath):
         filepath: Path to the Newick tree file.
 
     Returns:
-        A list of Bio.Phylo tree objects.
+        A list of tree objects.
 
     Raises:
         FileNotFoundError: If the file does not exist.
         ValueError: If the file contains invalid Newick format.
     """
     try:
-        trees = list(Phylo.parse(filepath, "newick"))
+        trees = dendropy.TreeList.get(path=filepath, schema="newick", preserve_underscores=True)
         if not trees:
             raise ValueError(f"Invalid Newick format in {filepath}")
-        # Validate that each tree has at least one terminal (leaf node)
         for idx, tree in enumerate(trees, start=1):
-            if not tree.get_terminals():
+            if not tree.leaf_nodes():
                 raise ValueError(f"Invalid Newick format in {filepath}: Tree {idx} has no terminal nodes")
-        return trees
+        return list(trees)
     except FileNotFoundError:
         raise FileNotFoundError(f"Tree file not found: {filepath}")
     except ValueError:
-        # Re-raise ValueError as-is (our own validation errors)
         raise
     except Exception as e:
-        # Catch any parsing errors from BioPython
         raise ValueError(f"Invalid Newick format in {filepath}: {e}")
-
-
-def read_newick_lines(filepath):
-    """Read Newick strings from a file (one tree per line)."""
-    with open(filepath, "r") as f:
-        return [line.strip() for line in f if line.strip()]
 
 
 def read_triplet_filter_file(filepath):
@@ -91,10 +80,162 @@ def filter_triplets_by_taxa(triplets, taxa_set):
     return kept_triplets, skipped_triplets
 
 
-def _chunk_list(items, chunk_size):
-    """Yield successive chunks from a list."""
-    for i in range(0, len(items), chunk_size):
-        yield items[i : i + chunk_size]
+def calculate_average_support(tree):
+    """Calculate the average support value for a tree.
+
+    Args:
+        tree: A tree object.
+
+    Returns:
+        The average support value across all internal nodes, or None if no support values found.
+    """
+    support_values = []
+    for node in tree.preorder_node_iter():
+        if node.is_leaf():
+            continue
+        if node.label is not None:
+            try:
+                support_values.append(float(node.label))
+            except ValueError:
+                continue
+
+    if not support_values:
+        return None
+
+    return sum(support_values) / len(support_values)
+
+
+def remove_support_values(tree):
+    """Remove support values (internal node labels) from a tree."""
+    for node in tree.preorder_node_iter():
+        if not node.is_leaf():
+            node.label = None
+    return tree
+
+
+def standardize_tree(tree):
+    """Standardize a tree by removing support values."""
+    return remove_support_values(tree)
+
+
+def format_newick_with_precision(tree, decimal_places=10):
+    """Format a tree to Newick string with custom decimal precision for branch lengths."""
+
+    def format_branch_length(branch_length):
+        formatted = f"{branch_length:.{decimal_places}f}"
+        if "." in formatted:
+            formatted = formatted.rstrip("0").rstrip(".")
+        return formatted
+
+    def format_node(node):
+        if node.is_leaf():
+            result = node.taxon.label if node.taxon else ""
+        else:
+            children = [format_node(child) for child in node.child_node_iter()]
+            result = "(" + ",".join(children) + ")"
+
+        if node.edge_length is not None:
+            result += f":{format_branch_length(node.edge_length)}"
+
+        return result
+
+    return format_node(tree.seed_node) + ";"
+
+
+def write_clean_trees(trees, output_filepath, decimal_places=15):
+    """Write standardized trees to a file using custom precision."""
+    with open(output_filepath, "w") as f:
+        for tree in trees:
+            newick_str = format_newick_with_precision(tree, decimal_places)
+            f.write(newick_str + "\n")
+
+
+def clean_and_save_trees(input_filepath, output_filepath, min_avg_support=0.5):
+    """Read, standardize, and save trees from a file.
+
+    Returns:
+        A tuple of (cleaned_trees_list, dropped_trees_info_dict).
+    """
+    trees = read_tree_file(input_filepath)
+
+    dropped_trees = {}
+    cleaned_trees = []
+
+    for idx, tree in enumerate(trees, start=1):
+        avg_support = calculate_average_support(tree)
+        if avg_support is not None and avg_support < min_avg_support:
+            dropped_trees[idx] = avg_support
+            continue
+
+        standardized = standardize_tree(tree)
+        cleaned_trees.append(standardized)
+
+    write_clean_trees(cleaned_trees, output_filepath)
+
+    return cleaned_trees, dropped_trees
+
+
+def get_clean_filename(filepath):
+    """Generate a clean filename with _clean prefix."""
+    path = Path(filepath)
+    return str(path.parent / f"{path.stem}_clean{path.suffix}")
+
+
+def get_taxa_from_tree(tree):
+    """Extract all terminal taxa names from a phylogenetic tree."""
+    taxa = [leaf.taxon.label for leaf in tree.leaf_nodes() if leaf.taxon]
+    return sorted(taxa)
+
+
+def generate_triplets(taxa_list, outgroup):
+    """Generate all unique triplet combinations from taxa excluding the outgroup(s)."""
+    if isinstance(outgroup, str):
+        outgroup_taxa = set(_parse_outgroup_arg(outgroup))
+    else:
+        outgroup_taxa = set(outgroup)
+    ingroup_taxa = [taxon for taxon in taxa_list if taxon not in outgroup_taxa]
+    return list(combinations(ingroup_taxa, 3))
+
+
+def write_triplets_to_file(triplets, output_filepath):
+    """Write triplets to a file, one triplet per line."""
+    with open(output_filepath, "w") as f:
+        for triplet in triplets:
+            f.write(",".join(triplet) + "\n")
+
+
+def extract_triplet_subtree(tree, triplet_taxa):
+    """Extract a subtree containing only the specified triplet taxa.
+
+    Returns:
+        A new tree containing only the specified taxa, or None if not all taxa are present.
+    """
+    tree_taxa = {leaf.taxon.label for leaf in tree.leaf_nodes() if leaf.taxon}
+    if not set(triplet_taxa).issubset(tree_taxa):
+        return None
+
+    subtree = tree.extract_tree_with_taxa_labels(triplet_taxa)
+    return subtree
+
+
+def process_gene_trees_for_triplets(gene_trees, triplets):
+    """Process gene trees to extract subtrees for each triplet."""
+    triplet_gene_trees = {triplet: [] for triplet in triplets}
+
+    for gene_tree in gene_trees:
+        for triplet in triplets:
+            subtree = extract_triplet_subtree(gene_tree, triplet)
+            if subtree:
+                newick_str = format_newick_with_precision(subtree)
+                triplet_gene_trees[triplet].append(newick_str)
+
+    return triplet_gene_trees
+
+
+def _chunk_list(lst, chunk_size):
+    """Split a list into chunks of specified size."""
+    for i in range(0, len(lst), chunk_size):
+        yield lst[i : i + chunk_size]
 
 
 def _get_mp_context():
@@ -116,43 +257,13 @@ def _parse_outgroup_arg(outgroup_arg):
     return [str(taxon).strip() for taxon in outgroup_arg if str(taxon).strip()]
 
 
-def _copy_clade_for_taxa(clade, taxa_set):
-    """Copy a clade while retaining only the specified taxa, collapsing unary nodes."""
-    if clade.is_terminal():
-        if clade.name in taxa_set:
-            return Clade(branch_length=clade.branch_length, name=clade.name)
-        return None
-
-    new_children = []
-    for child in clade.clades:
-        copied = _copy_clade_for_taxa(child, taxa_set)
-        if copied is not None:
-            new_children.append(copied)
-
-    if not new_children:
-        return None
-
-    if len(new_children) == 1:
-        only_child = new_children[0]
-        if clade.branch_length is not None:
-            if only_child.branch_length is None:
-                only_child.branch_length = clade.branch_length
-            else:
-                only_child.branch_length += clade.branch_length
-        return only_child
-
-    new_clade = Clade(branch_length=clade.branch_length, clades=new_children)
-    new_clade.confidence = clade.confidence
-    return new_clade
-
-
 def _root_tree_on_outgroup(tree, outgroup_taxa):
     """Root a tree on the MRCA of outgroup taxa and prune the outgroup clade.
 
     Returns:
         Tuple of (pruned_tree, excluded_taxa_set, missing_taxa_set, ingroup_taxa_set).
     """
-    tree_taxa = {terminal.name for terminal in tree.get_terminals()}
+    tree_taxa = {leaf.taxon.label for leaf in tree.leaf_nodes() if leaf.taxon}
     outgroup_set = set(outgroup_taxa)
     missing = outgroup_set - tree_taxa
     present = [taxon for taxon in outgroup_taxa if taxon in tree_taxa]
@@ -160,297 +271,25 @@ def _root_tree_on_outgroup(tree, outgroup_taxa):
     if not present:
         return None, set(), missing, set()
 
-    present_terminals = [terminal for terminal in tree.get_terminals() if terminal.name in present]
-    if len(present_terminals) == 1:
-        mrca = present_terminals[0]
-    else:
-        mrca = tree.common_ancestor(*present_terminals)
-
+    tree.is_rooted = True
+    mrca = tree.mrca(taxon_labels=present)
     if mrca is None:
         return None, set(), missing, set()
 
-    excluded_taxa = {terminal.name for terminal in mrca.get_terminals()}
-    tree.root_with_outgroup(mrca)
+    excluded_taxa = {leaf.taxon.label for leaf in mrca.leaf_nodes() if leaf.taxon}
+    tree.reroot_at_node(mrca)
     ingroup_taxa = set(tree_taxa) - excluded_taxa
     if not ingroup_taxa:
         return None, excluded_taxa, missing, set()
 
-    pruned_root = _copy_clade_for_taxa(tree.root, ingroup_taxa)
-    if pruned_root is None:
-        return None, excluded_taxa, missing, set()
+    # Prune outgroup taxa from the tree
+    tree.prune_taxa_with_labels(list(excluded_taxa))
 
-    pruned_tree = Tree(root=pruned_root, rooted=True)
+    return tree, excluded_taxa, missing, ingroup_taxa
 
-    return pruned_tree, excluded_taxa, missing, ingroup_taxa
 
-
-def calculate_average_support(tree):
-    """Calculate the average support value for a tree.
-
-    Args:
-        tree: A Bio.Phylo tree object.
-
-    Returns:
-        The average support value across all internal nodes, or None if no support values found.
-    """
-    support_values = []
-    for clade in tree.find_clades():
-        if not clade.is_terminal() and clade.confidence is not None:
-            support_values.append(clade.confidence)
-
-    if not support_values:
-        return None
-
-    return sum(support_values) / len(support_values)
-
-
-def remove_support_values(tree):
-    """Remove support values (bootstrap/posterior probabilities) from internal nodes.
-
-    This function removes confidence values that appear after internal nodes
-    in Newick format trees like: (A,B)0.95:0.5 -> (A,B):0.5
-
-    Args:
-        tree: A Bio.Phylo tree object.
-
-    Returns:
-        The tree with support values removed from all internal nodes.
-    """
-    # Traverse all internal nodes (non-terminals) and remove confidence values
-    for clade in tree.find_clades():
-        if not clade.is_terminal():
-            clade.confidence = None
-    return tree
-
-
-def standardize_tree(tree):
-    """Standardize a BioPython tree object.
-
-    This function takes a BioPython tree object and standardizes it by:
-    - Removing support values (bootstrap/posterior probabilities) from internal nodes
-    - Ensuring consistent Newick format output
-    - Preserving branch lengths and taxa names
-
-    Args:
-        tree: A Bio.Phylo tree object.
-
-    Returns:
-        A Bio.Phylo tree object (standardized).
-    """
-    tree = remove_support_values(tree)
-    return tree
-
-
-def format_newick_with_precision(tree, decimal_places=10):
-    """Format a tree to Newick string with custom decimal precision for branch lengths.
-
-    Trailing zeros after decimal places are removed to keep the output clean while
-    preserving necessary precision.
-
-    Args:
-        tree: A Bio.Phylo tree object.
-        decimal_places: Number of decimal places for branch lengths. Default: 10.
-
-    Returns:
-        A Newick format string with the specified decimal precision and trailing zeros removed.
-    """
-
-    def format_branch_length(branch_length):
-        """Format branch length with precision and remove trailing zeros."""
-        # Format with specified decimal places
-        formatted = f"{branch_length:.{decimal_places}f}"
-        # Remove trailing zeros after the decimal point
-        if "." in formatted:
-            formatted = formatted.rstrip("0").rstrip(".")
-        return formatted
-
-    def format_clade(clade):
-        """Recursively format a clade to Newick string."""
-        if clade.is_terminal():
-            # Leaf node: just the name and branch length
-            result = clade.name or ""
-        else:
-            # Internal node: format all children recursively
-            children = [format_clade(c) for c in clade.clades]
-            result = "(" + ",".join(children) + ")"
-
-        # Add branch length if present
-        if clade.branch_length is not None:
-            # Format branch length with custom precision and remove trailing zeros
-            result += f":{format_branch_length(clade.branch_length)}"
-
-        return result
-
-    # Format the entire tree
-    newick_str = format_clade(tree.root) + ";"
-    return newick_str
-
-
-def write_clean_trees(trees, output_filepath, decimal_places=15):
-    """Write standardized trees to a file using BioPython with custom precision.
-
-    Args:
-        trees: A list of Bio.Phylo tree objects.
-        output_filepath: Path where the cleaned trees will be written.
-        decimal_places: Number of decimal places for branch lengths. Default: 10.
-    """
-    with open(output_filepath, "w") as f:
-        for tree in trees:
-            # Write Newick format with custom decimal precision
-            newick_str = format_newick_with_precision(tree, decimal_places)
-            f.write(newick_str + "\n")
-
-
-def clean_and_save_trees(input_filepath, output_filepath, min_avg_support=0.5):
-    """Read, standardize, and save trees from a file using BioPython.
-
-    Trees with average support values below the threshold are filtered out.
-
-    Args:
-        input_filepath: Path to the input Newick format tree file.
-        output_filepath: Path where the cleaned trees will be written.
-        min_avg_support: Minimum average support value threshold. Default: 0.5.
-
-    Returns:
-        A tuple of (cleaned_trees_list, dropped_trees_info_dict).
-        dropped_trees_info_dict maps tree index to average support value.
-    """
-    # Read the trees using BioPython
-    trees = read_tree_file(input_filepath)
-
-    # Track dropped trees
-    dropped_trees = {}
-    cleaned_trees = []
-
-    # Process each tree
-    for idx, tree in enumerate(trees, start=1):
-        # Calculate average support before standardization
-        avg_support = calculate_average_support(tree)
-
-        # Check if tree meets minimum support threshold
-        if avg_support is not None and avg_support < min_avg_support:
-            dropped_trees[idx] = avg_support
-            continue
-
-        # Standardize the tree (removes support values)
-        standardized = standardize_tree(tree)
-        cleaned_trees.append(standardized)
-
-    # Write to output file using BioPython
-    write_clean_trees(cleaned_trees, output_filepath)
-
-    return cleaned_trees, dropped_trees
-
-
-def get_clean_filename(filepath):
-    """Generate a clean filename with _clean prefix.
-
-    Args:
-        filepath: The original file path.
-
-    Returns:
-        The path with _clean inserted before the file extension.
-    """
-    path = Path(filepath)
-    return str(path.parent / f"{path.stem}_clean{path.suffix}")
-
-
-def get_taxa_from_tree(tree):
-    """Extract all terminal taxa names from a phylogenetic tree.
-
-    Args:
-        tree: A Bio.Phylo tree object.
-
-    Returns:
-        A sorted list of terminal taxa names.
-    """
-    taxa = [terminal.name for terminal in tree.get_terminals()]
-    return sorted(taxa)
-
-
-def generate_triplets(taxa_list, outgroup):
-    """Generate all unique triplet combinations from taxa excluding the outgroup(s).
-
-    Args:
-        taxa_list: List of all taxa names.
-        outgroup: Outgroup taxon or iterable of taxa to exclude.
-
-    Returns:
-        A list of tuples, where each tuple contains 3 taxa names.
-    """
-    if isinstance(outgroup, str):
-        outgroup_taxa = set(_parse_outgroup_arg(outgroup))
-    else:
-        outgroup_taxa = set(outgroup)
-
-    # Remove outgroup taxa from taxa list
-    ingroup_taxa = [taxon for taxon in taxa_list if taxon not in outgroup_taxa]
-
-    # Generate all possible triplet combinations
-    triplets = list(combinations(ingroup_taxa, 3))
-
-    return triplets
-
-
-def write_triplets_to_file(triplets, output_filepath):
-    """Write triplets to a file, one triplet per line.
-
-    Args:
-        triplets: List of triplet tuples.
-        output_filepath: Path where the triplets will be written.
-    """
-    with open(output_filepath, "w") as f:
-        for triplet in triplets:
-            f.write(",".join(triplet) + "\n")
-
-
-def extract_triplet_subtree(tree, triplet_taxa):
-    """Extract a subtree containing only the specified triplet taxa.
-
-    Args:
-        tree: A Bio.Phylo tree object.
-        triplet_taxa: List or tuple of 3 taxa names to extract.
-
-    Returns:
-        A new Bio.Phylo tree containing only the specified taxa, or None if not all taxa are present.
-    """
-    return _extract_triplet_subtree(tree, triplet_taxa)
-
-
-def _extract_triplet_subtree(tree, triplet_taxa, tree_taxa=None):
-    """Internal helper to extract a subtree for a triplet with optional taxa cache."""
-    # Get all terminal names in the tree
-    if tree_taxa is None:
-        tree_taxa = {terminal.name for terminal in tree.get_terminals()}
-
-    # Check if all triplet taxa are present in the tree
-    if not set(triplet_taxa).issubset(tree_taxa):
-        return None
-
-    triplet_terminals = [terminal for terminal in tree.get_terminals() if terminal.name in triplet_taxa]
-    if len(triplet_terminals) != 3:
-        return None
-
-    mrca = tree.common_ancestor(*triplet_terminals)
-    if mrca is None:
-        return None
-
-    pruned_root = _copy_clade_for_taxa(mrca, set(triplet_taxa))
-    if pruned_root is None:
-        return None
-
-    return Tree(root=pruned_root, rooted=True)
-
-
-_TRIPLET_SET = None
 _GENE_TREES_PATH = None
 _CHUNK_DIR = None
-
-
-def _init_triplet_worker(triplet_set):
-    """Initializer for multiprocessing workers."""
-    global _TRIPLET_SET
-    _TRIPLET_SET = triplet_set
 
 
 def _init_triplet_chunk_worker(gene_trees_path, chunk_dir):
@@ -458,24 +297,6 @@ def _init_triplet_chunk_worker(gene_trees_path, chunk_dir):
     global _GENE_TREES_PATH, _CHUNK_DIR
     _GENE_TREES_PATH = gene_trees_path
     _CHUNK_DIR = chunk_dir
-
-
-def _process_single_gene_tree(newick_str):
-    """Process a single gene tree (as Newick string) for all relevant triplets."""
-    tree = Phylo.read(StringIO(newick_str), "newick")
-    tree_taxa = {terminal.name for terminal in tree.get_terminals()}
-    taxa_sorted = sorted(tree_taxa)
-    results = []
-
-    for triplet in combinations(taxa_sorted, 3):
-        if triplet not in _TRIPLET_SET:
-            continue
-        subtree = _extract_triplet_subtree(tree, triplet, tree_taxa=tree_taxa)
-        if subtree:
-            newick_str = format_newick_with_precision(subtree)
-            results.append((triplet, newick_str))
-
-    return results
 
 
 def _process_triplet_chunk_stream(args):
@@ -488,12 +309,12 @@ def _process_triplet_chunk_stream(args):
             newick_str = line.strip()
             if not newick_str:
                 continue
-            tree = Phylo.read(StringIO(newick_str), "newick")
-            tree_taxa = {terminal.name for terminal in tree.get_terminals()}
+            tree = dendropy.Tree.get(data=newick_str, schema="newick", preserve_underscores=True)
+            tree_taxa = {taxon.label for taxon in tree.taxon_namespace if taxon.label}
             for triplet in triplet_chunk:
                 if not set(triplet).issubset(tree_taxa):
                     continue
-                subtree = _extract_triplet_subtree(tree, triplet, tree_taxa=tree_taxa)
+                subtree = extract_triplet_subtree(tree, triplet)
                 if subtree:
                     triplet_results[triplet].append(format_newick_with_precision(subtree))
 
@@ -511,6 +332,7 @@ def _process_triplet_chunk_stream(args):
         output_lines.append("")
         for newick in newick_trees:
             output_lines.append(newick)
+
         if i < len(triplet_chunk) - 1:
             output_lines.append("")
             output_lines.append("=" * 60)
@@ -574,75 +396,6 @@ def _calculate_worker_count(total_items, use_multiprocessing, processes):
     available_cpus = cpu_count()
     worker_count = processes or available_cpus
     return max(1, min(worker_count, total_items))
-
-
-def process_gene_trees_for_triplets(gene_trees, triplets, use_multiprocessing=True, processes=None, chunksize=None):
-    """Process gene trees to extract subtrees for each triplet.
-
-    Processes each gene tree against all relevant triplets.
-    Uses multiprocessing to parallelize gene tree processing if enabled.
-
-    Args:
-        gene_trees: List of Bio.Phylo tree objects or Newick strings.
-        triplets: List of triplet tuples to extract.
-        use_multiprocessing: Whether to use multiprocessing (default: True).
-                           If False, processes sequentially on single worker.
-        processes: Number of worker processes when multiprocessing is enabled.
-                   Defaults to cpu_count(). Only used if use_multiprocessing=True.
-        chunksize: Chunk size for multiprocessing task distribution.
-                   Only used if use_multiprocessing=True.
-
-    Returns:
-        A dictionary mapping triplets to lists of subtree Newick strings.
-    """
-    triplet_gene_trees = {triplet: [] for triplet in triplets}
-
-    if not gene_trees or not triplets:
-        return triplet_gene_trees
-
-    triplet_set = set(triplets)
-
-    # Calculate worker count based on multiprocessing flag
-    if use_multiprocessing:
-        available_cpus = cpu_count()
-        worker_count = processes or available_cpus
-        worker_count = max(1, min(worker_count, len(gene_trees)))
-    else:
-        worker_count = 1
-
-    if use_multiprocessing and worker_count > 1:
-        # Serialize trees to Newick to ensure compatibility across platforms
-        if isinstance(gene_trees[0], str):
-            gene_tree_newicks = gene_trees
-        else:
-            gene_tree_newicks = [format_newick_with_precision(tree, decimal_places=15) for tree in gene_trees]
-        if chunksize is None:
-            chunksize = max(1, len(gene_tree_newicks) // (worker_count * 4))
-
-        ctx = _get_mp_context()
-        with ctx.Pool(processes=worker_count, initializer=_init_triplet_worker, initargs=(triplet_set,)) as pool:
-            for result in pool.imap(_process_single_gene_tree, gene_tree_newicks, chunksize=chunksize):
-                for triplet, newick in result:
-                    triplet_gene_trees[triplet].append(newick)
-    else:
-        if isinstance(gene_trees[0], str):
-            for newick_str in gene_trees:
-                for triplet, newick in _process_single_gene_tree(newick_str):
-                    triplet_gene_trees[triplet].append(newick)
-        else:
-            for gene_tree in gene_trees:
-                tree_taxa = {terminal.name for terminal in gene_tree.get_terminals()}
-                taxa_sorted = sorted(tree_taxa)
-                for triplet in combinations(taxa_sorted, 3):
-                    if triplet not in triplet_set:
-                        continue
-                    subtree = _extract_triplet_subtree(gene_tree, triplet, tree_taxa=tree_taxa)
-                    if subtree:
-                        # Convert to Newick string using our custom formatting
-                        newick_str = format_newick_with_precision(subtree)
-                        triplet_gene_trees[triplet].append(newick_str)
-
-    return triplet_gene_trees
 
 
 def write_triplet_gene_trees_multiprocess(
@@ -725,52 +478,87 @@ def write_triplet_gene_trees_multiprocess(
 
 
 def write_triplet_gene_trees(triplet_gene_trees, output_filepath):
-    """Write triplet gene trees to a file in the specified format.
-
-    Format:
-    TaxonA,TaxonB,TaxonC<tab><count>
-    <blank line>
-    newick_tree_1
-    newick_tree_2
-    ...
-    <blank line>
-    <blank line>
-    NextTriplet...
-
-    Args:
-        triplet_gene_trees: Dictionary mapping triplets to lists of Newick strings.
-        output_filepath: Path where the results will be written.
-    """
+    """Write triplet gene trees to a file in the specified format."""
     with open(output_filepath, "w") as f:
         for i, (triplet, newick_trees) in enumerate(triplet_gene_trees.items()):
-            # Write header line: triplet and count
             triplet_str = ",".join(triplet)
             count = len(newick_trees)
             f.write(f"{triplet_str}\t{count}\n")
-
-            # Write blank line
             f.write("\n")
 
-            # Write all Newick trees for this triplet
             for newick in newick_trees:
                 f.write(f"{newick}\n")
 
-            # Write separator between triplets (except after the last one)
             if i < len(triplet_gene_trees) - 1:
                 f.write("\n" + "=" * 60 + "\n")
+
+
+def write_triplet_gene_trees_streaming(triplets, gene_trees_filepath, output_filepath):
+    """Write triplet gene trees by streaming one triplet at a time.
+
+    This avoids keeping all triplet results in memory and only stores
+    the current triplet's subtrees.
+
+    Returns:
+        Tuple of (total_subtrees, triplets_with_trees).
+    """
+    total_subtrees = 0
+    triplets_with_trees = 0
+
+    with open(output_filepath, "w") as out_f:
+        for idx, triplet in enumerate(triplets):
+            newick_trees = []
+            triplet_set = set(triplet)
+
+            with open(gene_trees_filepath, "r") as gene_f:
+                for line in gene_f:
+                    newick_str = line.strip()
+                    if not newick_str:
+                        continue
+                    tree = dendropy.Tree.get(data=newick_str, schema="newick", preserve_underscores=True)
+                    tree_taxa = {taxon.label for taxon in tree.taxon_namespace if taxon.label}
+                    if not triplet_set.issubset(tree_taxa):
+                        continue
+                    subtree = extract_triplet_subtree(tree, triplet)
+                    if subtree:
+                        newick_trees.append(format_newick_with_precision(subtree))
+
+            count = len(newick_trees)
+            total_subtrees += count
+            if count > 0:
+                triplets_with_trees += 1
+
+            out_f.write(",".join(triplet) + f"\t{count}\n")
+            out_f.write("\n")
+            for newick in newick_trees:
+                out_f.write(f"{newick}\n")
+
+            if idx < len(triplets) - 1:
+                out_f.write("\n" + "=" * 60 + "\n")
+
+    return total_subtrees, triplets_with_trees
 
 
 class MetricsLogger:
     """Logger that writes to both stdout and a metrics file."""
 
-    def __init__(self, metrics_filepath):
-        self.metrics_filepath = metrics_filepath
+    def __init__(self, filepath):
+        """Initialize the metrics logger.
+
+        Args:
+            filepath: Path to the metrics file.
+        """
+        self.filepath = filepath
         self.metrics_file = None
         self.lines = []
 
     def __enter__(self):
         """Context manager entry: open the metrics file."""
-        self.metrics_file = open(self.metrics_filepath, "w")
+        try:
+            self.metrics_file = open(self.filepath, "w")
+        except Exception as e:
+            print(f"Warning: Could not open metrics file {self.filepath}: {e}")
+            self.metrics_file = None
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -860,7 +648,7 @@ def main():
         metrics.log("Support threshold: 0.5")
         metrics.log("")
 
-        # Clean and save species tree, then re-read from *_clean file for downstream steps
+        # Clean and save species tree
         try:
             species_start = time.time()
             species_trees, dropped_species = clean_and_save_trees(str(species_tree_path), species_tree_clean)
@@ -871,7 +659,7 @@ def main():
                 for idx, avg_support in dropped_species.items():
                     metrics.log(f"    - Index {idx} from {args.species_tree} (avg support: {avg_support:.4f})")
 
-            # Always use the cleaned file for subsequent processing
+            # Re-read the cleaned file for subsequent processing
             species_trees = read_tree_file(species_tree_clean)
             metrics.log(f"  Time taken: {time.time() - species_start:.2f}s")
         except Exception as e:
@@ -952,7 +740,7 @@ def main():
             metrics.log(f"✗ Error generating triplets: {e}")
             return
 
-        # Clean and save gene trees, then re-read from *_clean file for downstream steps
+        # Clean and save gene trees
         try:
             genes_start = time.time()
             gene_trees, dropped_genes = clean_and_save_trees(str(gene_trees_path), gene_trees_clean)
@@ -963,8 +751,8 @@ def main():
                 for idx, avg_support in dropped_genes.items():
                     metrics.log(f"    - Index {idx} from {args.gene_trees} (avg support: {avg_support:.4f})")
 
-            # Read cleaned Newick strings for downstream processing
-            gene_trees = read_newick_lines(gene_trees_clean)
+            # Re-read cleaned gene trees for downstream processing
+            gene_trees = read_tree_file(gene_trees_clean)
             metrics.log(f"  Time taken: {time.time() - genes_start:.2f}s")
         except Exception as e:
             metrics.log(f"✗ Error processing gene trees: {e}")
@@ -979,7 +767,7 @@ def main():
             triplet_output_path = str(output_dir / f"{gene_trees_path.stem}_unique_triplet_gene_trees.txt")
 
             worker_count = _calculate_worker_count(
-                len(gene_trees),
+                len(triplets),
                 use_multiprocessing=not args.no_multiprocessing,
                 processes=args.processes,
             )

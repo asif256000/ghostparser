@@ -9,6 +9,7 @@ A phylogenetic tree parser for identifying ghost introgressions. This tool proce
 - **High-Precision Branch Lengths**: Preserves branch lengths with 10 decimal places, removes trailing zeros
 - **Triplet Generation**: Generates all unique triplet combinations from taxa (nC3)
 - **Triplet Subtree Extraction**: Extracts subtrees from gene trees for each triplet with proper branch length calculations
+- **Low-Memory Parallel Triplets**: Processes triplet chunks in parallel while streaming gene trees from disk to avoid large in-memory triplet maps
 
 ## Quick Start
 
@@ -29,9 +30,12 @@ python -m ghostparser.tree_parser -st species.tree -gt genes.tree -og OutGroup
 **Required:**
 - `-st, --species_tree`: Path to the species tree file in Newick format
 - `-gt, --gene_trees`: Path to the gene trees file in Newick format
-- `-og, --outgroup`: Outgroup species identifier
+- `-og, --outgroup`: Outgroup species identifier(s). Use comma-separated taxa for multiple outgroups.
 
 **Optional:**
+- `-o, --output`: Output folder relative to the input data folder (default: same folder as input data).
+- `-tf, --triplet-filter`: Path to a triplet filter file (comma-separated taxa per line). When provided, only those
+    triplets are processed. Triplets containing taxa missing from the species tree are skipped with a warning.
 - `-p, --processes`: Number of worker processes for multiprocessing (only used with `-p/--processes`).
                     Defaults to cpu_count(). Ignored if `--no-multiprocessing` is set.
 - `--no-multiprocessing`: Disable multiprocessing. Processes triplets sequentially using a single worker.
@@ -39,10 +43,11 @@ python -m ghostparser.tree_parser -st species.tree -gt genes.tree -og OutGroup
 
 ## Output Files
 
-The tool generates three output files:
+The tool generates these output files:
 
 1. **`*_clean.tree`** - Cleaned trees with support values removed and low-quality trees filtered (all downstream processing uses these cleaned files)
-2. **`*_unique_triplet_gene_trees.txt`** - All triplet combinations with their corresponding gene trees
+2. **`*_unique_triplet_gene_trees.txt`** - Triplet combinations with their corresponding gene trees
+3. **`*_metrics.txt`** - Metrics log with warnings, timings, and counts
 
 ## Example
 
@@ -64,6 +69,24 @@ The tool generates three output files:
 ```bash
 python -m ghostparser.tree_parser -st species.tree -gt genes.tree -og OutGroup
 ```
+
+Multiple outgroups (comma-separated):
+
+```bash
+python -m ghostparser.tree_parser -st species.tree -gt genes.tree -og OutGroup1,OutGroup2
+```
+
+Triplet filter file (comma-separated taxa per line):
+
+`triplets.txt` is an input filter file; only those triplets are processed.
+
+```bash
+python -m ghostparser.tree_parser -st species.tree -gt genes.tree -og OutGroup -tf triplets.txt
+```
+
+When multiple outgroups are provided, the species tree is rooted on their most recent common ancestor (MRCA) and
+the outgroup clade is pruned. Any additional taxa that fall inside the outgroup clade are excluded from triplet
+generation and logged as a warning (including the full list of excluded taxa) in the metrics file.
 
 **Output** (`genes_unique_triplet_gene_trees.txt`):
 
