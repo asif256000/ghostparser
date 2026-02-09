@@ -9,6 +9,7 @@ from pathlib import Path
 import time
 
 from Bio import Phylo
+from Bio.Phylo.BaseTree import Clade, Tree
 
 
 def read_tree_file(filepath):
@@ -49,6 +50,47 @@ def read_newick_lines(filepath):
         return [line.strip() for line in f if line.strip()]
 
 
+def read_triplet_filter_file(filepath):
+    """Read triplet filter file with comma-separated taxa per line.
+
+    Returns:
+        Tuple of (triplets, invalid_lines) where invalid_lines is a list of
+        (line_number, line_text) for lines that do not parse into 3 taxa.
+    """
+    triplets = []
+    invalid_lines = []
+    with open(filepath, "r") as f:
+        for line_number, line in enumerate(f, start=1):
+            raw = line.strip()
+            if not raw:
+                continue
+            parts = [part.strip() for part in raw.split(",")]
+            parts = [part for part in parts if part]
+            if len(parts) != 3:
+                invalid_lines.append((line_number, raw))
+                continue
+            triplets.append(tuple(parts))
+    return triplets, invalid_lines
+
+
+def filter_triplets_by_taxa(triplets, taxa_set):
+    """Filter triplets to those fully contained in taxa_set.
+
+    Returns:
+        Tuple of (kept_triplets, skipped_triplets) where skipped_triplets is a
+        list of (triplet, missing_taxa).
+    """
+    kept_triplets = []
+    skipped_triplets = []
+    for triplet in triplets:
+        missing = sorted(set(triplet) - taxa_set)
+        if missing:
+            skipped_triplets.append((triplet, missing))
+            continue
+        kept_triplets.append(triplet)
+    return kept_triplets, skipped_triplets
+
+
 def _chunk_list(items, chunk_size):
     """Yield successive chunks from a list."""
     for i in range(0, len(items), chunk_size):
@@ -64,6 +106,82 @@ def _get_mp_context():
         if "spawn" in methods:
             return mp.get_context("spawn")
     return mp
+
+
+def _parse_outgroup_arg(outgroup_arg):
+    """Parse comma-separated outgroup taxa into a list of names."""
+    if isinstance(outgroup_arg, str):
+        parts = [p.strip() for p in outgroup_arg.split(",")]
+        return [p for p in parts if p]
+    return [str(taxon).strip() for taxon in outgroup_arg if str(taxon).strip()]
+
+
+def _copy_clade_for_taxa(clade, taxa_set):
+    """Copy a clade while retaining only the specified taxa, collapsing unary nodes."""
+    if clade.is_terminal():
+        if clade.name in taxa_set:
+            return Clade(branch_length=clade.branch_length, name=clade.name)
+        return None
+
+    new_children = []
+    for child in clade.clades:
+        copied = _copy_clade_for_taxa(child, taxa_set)
+        if copied is not None:
+            new_children.append(copied)
+
+    if not new_children:
+        return None
+
+    if len(new_children) == 1:
+        only_child = new_children[0]
+        if clade.branch_length is not None:
+            if only_child.branch_length is None:
+                only_child.branch_length = clade.branch_length
+            else:
+                only_child.branch_length += clade.branch_length
+        return only_child
+
+    new_clade = Clade(branch_length=clade.branch_length, clades=new_children)
+    new_clade.confidence = clade.confidence
+    return new_clade
+
+
+def _root_tree_on_outgroup(tree, outgroup_taxa):
+    """Root a tree on the MRCA of outgroup taxa and prune the outgroup clade.
+
+    Returns:
+        Tuple of (pruned_tree, excluded_taxa_set, missing_taxa_set, ingroup_taxa_set).
+    """
+    tree_taxa = {terminal.name for terminal in tree.get_terminals()}
+    outgroup_set = set(outgroup_taxa)
+    missing = outgroup_set - tree_taxa
+    present = [taxon for taxon in outgroup_taxa if taxon in tree_taxa]
+
+    if not present:
+        return None, set(), missing, set()
+
+    present_terminals = [terminal for terminal in tree.get_terminals() if terminal.name in present]
+    if len(present_terminals) == 1:
+        mrca = present_terminals[0]
+    else:
+        mrca = tree.common_ancestor(*present_terminals)
+
+    if mrca is None:
+        return None, set(), missing, set()
+
+    excluded_taxa = {terminal.name for terminal in mrca.get_terminals()}
+    tree.root_with_outgroup(mrca)
+    ingroup_taxa = set(tree_taxa) - excluded_taxa
+    if not ingroup_taxa:
+        return None, excluded_taxa, missing, set()
+
+    pruned_root = _copy_clade_for_taxa(tree.root, ingroup_taxa)
+    if pruned_root is None:
+        return None, excluded_taxa, missing, set()
+
+    pruned_tree = Tree(root=pruned_root, rooted=True)
+
+    return pruned_tree, excluded_taxa, missing, ingroup_taxa
 
 
 def calculate_average_support(tree):
@@ -251,17 +369,22 @@ def get_taxa_from_tree(tree):
 
 
 def generate_triplets(taxa_list, outgroup):
-    """Generate all unique triplet combinations from taxa excluding the outgroup.
+    """Generate all unique triplet combinations from taxa excluding the outgroup(s).
 
     Args:
         taxa_list: List of all taxa names.
-        outgroup: The outgroup taxon to exclude.
+        outgroup: Outgroup taxon or iterable of taxa to exclude.
 
     Returns:
         A list of tuples, where each tuple contains 3 taxa names.
     """
-    # Remove outgroup from taxa list
-    ingroup_taxa = [taxon for taxon in taxa_list if taxon != outgroup]
+    if isinstance(outgroup, str):
+        outgroup_taxa = set(_parse_outgroup_arg(outgroup))
+    else:
+        outgroup_taxa = set(outgroup)
+
+    # Remove outgroup taxa from taxa list
+    ingroup_taxa = [taxon for taxon in taxa_list if taxon not in outgroup_taxa]
 
     # Generate all possible triplet combinations
     triplets = list(combinations(ingroup_taxa, 3))
@@ -304,32 +427,37 @@ def _extract_triplet_subtree(tree, triplet_taxa, tree_taxa=None):
     if not set(triplet_taxa).issubset(tree_taxa):
         return None
 
-    # Create a copy of the tree to avoid modifying the original
-    import copy
+    triplet_terminals = [terminal for terminal in tree.get_terminals() if terminal.name in triplet_taxa]
+    if len(triplet_terminals) != 3:
+        return None
 
-    subtree = copy.deepcopy(tree)
+    mrca = tree.common_ancestor(*triplet_terminals)
+    if mrca is None:
+        return None
 
-    # Get all terminals to remove (all except our triplet)
-    terminals_to_remove = [t.name for t in subtree.get_terminals() if t.name not in triplet_taxa]
+    pruned_root = _copy_clade_for_taxa(mrca, set(triplet_taxa))
+    if pruned_root is None:
+        return None
 
-    # Prune away unwanted terminals
-    for terminal_name in terminals_to_remove:
-        # Find the terminal in the tree
-        for terminal in subtree.get_terminals():
-            if terminal.name == terminal_name:
-                subtree.prune(terminal)
-                break
-
-    return subtree
+    return Tree(root=pruned_root, rooted=True)
 
 
 _TRIPLET_SET = None
+_GENE_TREES_PATH = None
+_CHUNK_DIR = None
 
 
 def _init_triplet_worker(triplet_set):
     """Initializer for multiprocessing workers."""
     global _TRIPLET_SET
     _TRIPLET_SET = triplet_set
+
+
+def _init_triplet_chunk_worker(gene_trees_path, chunk_dir):
+    """Initializer for multiprocessing triplet chunk workers."""
+    global _GENE_TREES_PATH, _CHUNK_DIR
+    _GENE_TREES_PATH = gene_trees_path
+    _CHUNK_DIR = chunk_dir
 
 
 def _process_single_gene_tree(newick_str):
@@ -348,6 +476,95 @@ def _process_single_gene_tree(newick_str):
             results.append((triplet, newick_str))
 
     return results
+
+
+def _process_triplet_chunk_stream(args):
+    """Process a chunk of triplets against all gene trees and write to a chunk file."""
+    chunk_index, triplet_chunk = args
+    triplet_results = {triplet: [] for triplet in triplet_chunk}
+
+    with open(_GENE_TREES_PATH, "r") as gene_f:
+        for line in gene_f:
+            newick_str = line.strip()
+            if not newick_str:
+                continue
+            tree = Phylo.read(StringIO(newick_str), "newick")
+            tree_taxa = {terminal.name for terminal in tree.get_terminals()}
+            for triplet in triplet_chunk:
+                if not set(triplet).issubset(tree_taxa):
+                    continue
+                subtree = _extract_triplet_subtree(tree, triplet, tree_taxa=tree_taxa)
+                if subtree:
+                    triplet_results[triplet].append(format_newick_with_precision(subtree))
+
+    total_subtrees = 0
+    triplets_with_trees = 0
+    output_lines = []
+    for i, triplet in enumerate(triplet_chunk):
+        newick_trees = triplet_results[triplet]
+        count = len(newick_trees)
+        total_subtrees += count
+        if count > 0:
+            triplets_with_trees += 1
+
+        output_lines.append(",".join(triplet) + f"\t{count}")
+        output_lines.append("")
+        for newick in newick_trees:
+            output_lines.append(newick)
+        if i < len(triplet_chunk) - 1:
+            output_lines.append("")
+            output_lines.append("=" * 60)
+            output_lines.append("")
+
+    chunk_path = Path(_CHUNK_DIR) / f"chunk_{chunk_index:06d}.txt"
+    with open(chunk_path, "w") as out_f:
+        out_f.write("\n".join(output_lines))
+        if output_lines:
+            out_f.write("\n")
+
+    return total_subtrees, triplets_with_trees
+
+
+def _merge_files_with_separators(input_paths, output_path):
+    """Merge input files into output file with separators between file contents."""
+    wrote_any = False
+    with open(output_path, "w") as out_f:
+        for path in input_paths:
+            content = Path(path).read_text()
+            if not content:
+                continue
+            if wrote_any:
+                out_f.write("\n" + "=" * 60 + "\n")
+            out_f.write(content)
+            if not content.endswith("\n"):
+                out_f.write("\n")
+            wrote_any = True
+
+
+def _merge_chunk_files(chunk_dir, output_filepath, batch_size=1000):
+    """Merge chunk files in batches to limit number of temp files."""
+    chunk_paths = sorted(Path(chunk_dir).glob("chunk_*.txt"))
+    aggregates = []
+    remaining = []
+
+    for batch_index in range(0, len(chunk_paths), batch_size):
+        batch = chunk_paths[batch_index : batch_index + batch_size]
+        if len(batch) == batch_size:
+            agg_path = Path(chunk_dir) / f"aggregate_{batch_index // batch_size:06d}.txt"
+            _merge_files_with_separators(batch, agg_path)
+            for path in batch:
+                path.unlink()
+            aggregates.append(agg_path)
+        else:
+            remaining = batch
+
+    final_parts = aggregates + remaining
+    _merge_files_with_separators(final_parts, output_filepath)
+
+    for path in remaining:
+        path.unlink()
+    for path in aggregates:
+        path.unlink()
 
 
 def _calculate_worker_count(total_items, use_multiprocessing, processes):
@@ -430,25 +647,26 @@ def process_gene_trees_for_triplets(gene_trees, triplets, use_multiprocessing=Tr
 
 def write_triplet_gene_trees_multiprocess(
     triplets,
-    gene_tree_newicks,
+    gene_trees_filepath,
     output_filepath,
     use_multiprocessing=True,
     processes=None,
     chunksize=None,
 ):
-    """Write triplet gene trees using multiprocessing over gene trees.
+    """Write triplet gene trees using multiprocessing over triplets.
 
-    Parallelizes across gene trees to avoid being bounded by the number of triplets.
+    Each worker processes a chunk of triplets and streams over the gene trees file.
+    Results are written to per-chunk files and merged in order to avoid high memory use.
 
     Args:
         triplets: List of triplet tuples to process.
-        gene_tree_newicks: List of Newick format tree strings.
+        gene_trees_filepath: Path to the cleaned gene trees file.
         output_filepath: Output file path for results.
         use_multiprocessing: Whether to use multiprocessing (default: True).
                            If False, processes sequentially on single worker.
         processes: Number of worker processes when multiprocessing is enabled.
                    Defaults to cpu_count(). Only used if use_multiprocessing=True.
-        chunksize: Chunk size for gene tree distribution to workers.
+        chunksize: Chunk size for triplet distribution to workers.
                    Only used if use_multiprocessing=True.
 
     Returns:
@@ -458,37 +676,50 @@ def write_triplet_gene_trees_multiprocess(
     with open(output_filepath, "w") as f:
         f.write("")
 
-    if not triplets or not gene_tree_newicks:
+    if not triplets:
         return 0, 0, 0
 
     worker_count = _calculate_worker_count(
-        len(gene_tree_newicks),
+        len(triplets),
         use_multiprocessing=use_multiprocessing,
         processes=processes,
     )
 
     if chunksize is None:
-        chunksize = max(1, len(gene_tree_newicks) // (worker_count * 4))
+        chunksize = max(1, len(triplets) // (worker_count * 4))
 
-    triplet_set = set(triplets)
-    triplet_gene_trees = {triplet: [] for triplet in triplets}
+    triplet_chunks = list(_chunk_list(triplets, chunksize))
+    chunk_dir = Path(output_filepath).with_suffix("").parent / f".{Path(output_filepath).stem}_chunks"
+    chunk_dir.mkdir(parents=True, exist_ok=True)
+
+    temp_gene_file = None
+    if not isinstance(gene_trees_filepath, (str, Path)):
+        temp_gene_file = chunk_dir / "gene_trees_tmp.txt"
+        temp_gene_file.write_text("\n".join(gene_trees_filepath))
+        gene_trees_filepath = str(temp_gene_file)
+
+    args = [(idx, chunk) for idx, chunk in enumerate(triplet_chunks)]
 
     if use_multiprocessing and worker_count > 1:
         ctx = _get_mp_context()
-        with ctx.Pool(processes=worker_count, initializer=_init_triplet_worker, initargs=(triplet_set,)) as pool:
-            for result in pool.imap(_process_single_gene_tree, gene_tree_newicks, chunksize=chunksize):
-                for triplet, newick in result:
-                    triplet_gene_trees[triplet].append(newick)
+        with ctx.Pool(
+            processes=worker_count,
+            initializer=_init_triplet_chunk_worker,
+            initargs=(gene_trees_filepath, str(chunk_dir)),
+        ) as pool:
+            totals = pool.map(_process_triplet_chunk_stream, args)
     else:
-        _init_triplet_worker(triplet_set)
-        for newick_str in gene_tree_newicks:
-            for triplet, newick in _process_single_gene_tree(newick_str):
-                triplet_gene_trees[triplet].append(newick)
+        _init_triplet_chunk_worker(gene_trees_filepath, str(chunk_dir))
+        totals = [_process_triplet_chunk_stream(item) for item in args]
 
-    write_triplet_gene_trees(triplet_gene_trees, output_filepath)
+    # Merge chunk files in batches to avoid too many temp files
+    _merge_chunk_files(chunk_dir, output_filepath, batch_size=1000)
+    if temp_gene_file and temp_gene_file.exists():
+        temp_gene_file.unlink()
+    chunk_dir.rmdir()
 
-    total_subtrees = sum(len(trees) for trees in triplet_gene_trees.values())
-    triplets_with_trees = sum(1 for trees in triplet_gene_trees.values() if trees)
+    total_subtrees = sum(t[0] for t in totals)
+    triplets_with_trees = sum(t[1] for t in totals)
 
     return total_subtrees, triplets_with_trees, worker_count
 
@@ -567,6 +798,13 @@ def main():
     parser.add_argument("-gt", "--gene_trees", required=True, help="Path to the gene trees file in Newick format")
     parser.add_argument("-og", "--outgroup", required=True, help="Outgroup species identifier")
     parser.add_argument(
+        "-tf",
+        "--triplet-filter",
+        type=str,
+        default=None,
+        help="Path to triplet filter file (comma-separated taxa per line)",
+    )
+    parser.add_argument(
         "-o",
         "--output",
         type=str,
@@ -617,7 +855,8 @@ def main():
     with MetricsLogger(metrics_filepath) as metrics:
         metrics.log(f"Processing species tree: {args.species_tree}")
         metrics.log(f"Processing gene trees: {args.gene_trees}")
-        metrics.log(f"Outgroup: {args.outgroup}")
+        outgroup_taxa = _parse_outgroup_arg(args.outgroup)
+        metrics.log(f"Outgroup: {', '.join(outgroup_taxa)}")
         metrics.log("Support threshold: 0.5")
         metrics.log("")
 
@@ -646,16 +885,69 @@ def main():
                 taxa = get_taxa_from_tree(species_trees[0])
                 metrics.log(f"\n✓ Found {len(taxa)} taxa in species tree")
 
-                # Check if outgroup exists in taxa
-                if args.outgroup not in taxa:
-                    metrics.log(f"⚠ Warning: Outgroup '{args.outgroup}' not found in species tree taxa")
-                    metrics.log(f"  Available taxa: {', '.join(taxa)}")
-                else:
-                    # Generate triplets excluding outgroup
-                    triplets = generate_triplets(taxa, args.outgroup)
+                pruned_tree, excluded_taxa, missing_taxa, ingroup_taxa = _root_tree_on_outgroup(
+                    species_trees[0], outgroup_taxa
+                )
 
+                if missing_taxa:
+                    metrics.log(
+                        f"⚠ Warning: Outgroup taxa not found in species tree: {', '.join(sorted(missing_taxa))}"
+                    )
+
+                if pruned_tree is None or not ingroup_taxa:
+                    metrics.log("⚠ Warning: Unable to root and prune species tree on outgroups")
+                    metrics.log(f"  Available taxa: {', '.join(taxa)}")
+                    return
+
+                extra_excluded = sorted(excluded_taxa - set(outgroup_taxa))
+                metrics.log(f"  Outgroup taxa excluded: {len(excluded_taxa)}")
+                if extra_excluded:
+                    metrics.log(
+                        "⚠ Warning: Additional taxa excluded while rooting on outgroups: "
+                        + ", ".join(extra_excluded)
+                    )
+                    metrics.log("  Excluded taxa: " + ", ".join(sorted(excluded_taxa)))
+
+                # Persist pruned species tree for downstream use
+                species_trees = [pruned_tree]
+                write_clean_trees(species_trees, species_tree_clean)
+
+                # Generate triplets from ingroup taxa only (or filter if provided)
+                if args.triplet_filter:
+                    filter_path = Path(args.triplet_filter)
+                    if not filter_path.exists():
+                        metrics.log(f"✗ Error: Triplet filter file not found: {args.triplet_filter}")
+                        return
+
+                    raw_triplets, invalid_lines = read_triplet_filter_file(str(filter_path))
+                    for line_number, raw in invalid_lines:
+                        metrics.log(
+                            f"⚠ Warning: Skipping invalid triplet line {line_number} in {filter_path}: {raw}"
+                        )
+
+                    filtered_triplets, skipped_triplets = filter_triplets_by_taxa(raw_triplets, set(ingroup_taxa))
+                    for triplet, missing in skipped_triplets:
+                        metrics.log(
+                            "⚠ Warning: Skipping triplet with missing taxa: "
+                            f"{','.join(triplet)} (missing: {', '.join(missing)})"
+                        )
+
+                    seen = set()
+                    triplets = []
+                    for triplet in filtered_triplets:
+                        if triplet not in seen:
+                            seen.add(triplet)
+                            triplets.append(triplet)
+
+                    metrics.log(f"✓ Using {len(triplets)} filtered triplets from: {filter_path}")
+                else:
+                    triplets = generate_triplets(sorted(ingroup_taxa), [])
                     metrics.log(f"✓ Generated {len(triplets)} unique triplets")
-                    metrics.log(f"  ({len(taxa) - 1} taxa choose 3 = {len(triplets)} combinations)")
+                    metrics.log(f"  ({len(ingroup_taxa)} taxa choose 3 = {len(triplets)} combinations)")
+
+                triplet_list_path = str(output_dir / f"{species_tree_path.stem}_triplets.txt")
+                write_triplets_to_file(triplets, triplet_list_path)
+                metrics.log(f"✓ Triplets saved to: {triplet_list_path}")
         except Exception as e:
             metrics.log(f"✗ Error generating triplets: {e}")
             return
@@ -695,7 +987,7 @@ def main():
 
             total_subtrees, triplets_with_trees, worker_count = write_triplet_gene_trees_multiprocess(
                 triplets,
-                gene_trees,
+                gene_trees_clean,
                 triplet_output_path,
                 use_multiprocessing=not args.no_multiprocessing,
                 processes=args.processes,
