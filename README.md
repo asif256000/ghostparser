@@ -45,9 +45,10 @@ python -m ghostparser.tree_parser -st species.tree -gt genes.tree -og OutGroup
 
 The tool generates these output files:
 
-1. **`*_clean.tree`** - Cleaned trees with support values removed and low-quality trees filtered (all downstream processing uses these cleaned files)
-2. **`*_unique_triplet_gene_trees.txt`** - Triplet combinations with their corresponding gene trees
-3. **`*_metrics.txt`** - Metrics log with warnings, timings, and counts
+1. **`processed_<species_tree>`** - Processed species tree with support values removed and outgroup rooting applied
+2. **`processed_<gene_trees>`** - Processed gene trees with support values removed and outgroup rooting applied
+3. **`unique_triplets_gene_trees.txt`** - Triplet combinations with their corresponding gene trees
+4. **`metrics.txt`** - Metrics log with warnings, timings, and counts
 
 ## Example
 
@@ -88,7 +89,7 @@ When multiple outgroups are provided, the species tree is rooted on their most r
 the outgroup clade is pruned. Any additional taxa that fall inside the outgroup clade are excluded from triplet
 generation and logged as a warning (including the full list of excluded taxa) in the metrics file.
 
-**Output** (`genes_unique_triplet_gene_trees.txt`):
+**Output** (`unique_triplets_gene_trees.txt`):
 
 ```
 TaxaA,TaxaB,TaxaC	2
