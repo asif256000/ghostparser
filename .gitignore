@@ -30,3 +30,6 @@ venv/
 
 # Scripts
 ghostparser*.sh
+
+# Documents
+*.pdf
