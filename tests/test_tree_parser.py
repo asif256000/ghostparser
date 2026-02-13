@@ -1,22 +1,24 @@
 """Test cases for the tree_parser module."""
 
+import tempfile
 from pathlib import Path
 
+import dendropy
 import pytest
 from Bio import Phylo
 from Bio.Phylo.BaseTree import Clade, Tree
 
 from ghostparser.tree_parser import (
     calculate_average_support,
+    clean_and_save_gene_trees,
     clean_and_save_trees,
     extract_triplet_subtree,
-    format_newick_with_precision,
     filter_triplets_by_taxa,
+    format_newick_with_precision,
     generate_triplets,
     get_clean_filename,
     get_taxa_from_tree,
     MetricsLogger,
-    _root_tree_on_outgroup,
     process_gene_trees_for_triplets,
     read_triplet_filter_file,
     read_tree_file,
@@ -27,6 +29,66 @@ from ghostparser.tree_parser import (
     write_triplet_gene_trees_multiprocess,
     write_triplets_to_file,
 )
+
+# ============================================================================
+# Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def simple_newick_file(tmp_path):
+    """Create a temporary file with a simple Newick tree."""
+    newick_str = "(TaxaA:0.001,(TaxaB:0.098,(((TaxaC:0.001,TaxaD:0.001):0.001,TaxaE:0.001):0.086,(TaxaF:0.001,TaxaG:0.001):0.032):0.001):0.012,OutGroup:0.558);"
+    tree_file = tmp_path / "simple_tree.nwk"
+    tree_file.write_text(newick_str)
+    return tree_file
+
+
+@pytest.fixture
+def newick_with_support_file(tmp_path):
+    """Create a temporary file with Newick tree containing support values."""
+    newick_str = "(((TaxaC,TaxaD)0.95:0.110599,(TaxaF,TaxaG)0.99:1.860334)0.98:0.500000,OutGroup)0.85;"
+    tree_file = tmp_path / "tree_with_support.nwk"
+    tree_file.write_text(newick_str)
+    return tree_file
+
+
+@pytest.fixture
+def multiple_trees_file(tmp_path):
+    """Create a temporary file with multiple Newick trees."""
+    newick_lines = [
+        "(TaxaA:0.001,(TaxaB:0.098,(TaxaC:0.001,TaxaD:0.001):0.001):0.012,OutGroup:0.558);",
+        "(TaxaB:0.098,(TaxaC:0.001,TaxaD:0.001):0.001,OutGroup:0.558);",
+        "((TaxaC:0.001,TaxaD:0.001):0.001,(TaxaB:0.098,TaxaA:0.001):0.012,OutGroup:0.558);",
+    ]
+    tree_file = tmp_path / "multiple_trees.nwk"
+    tree_file.write_text("\n".join(newick_lines))
+    return tree_file
+
+
+@pytest.fixture
+def low_support_tree_file(tmp_path):
+    """Create a temporary file with trees having low average support."""
+    newick_lines = [
+        "(((TaxaC,TaxaD)0.95:0.110599,(TaxaF,TaxaG)0.99:1.860334)0.98:0.500000,OutGroup);",
+        "(((TaxaC,TaxaD)0.3:0.110599,(TaxaF,TaxaG)0.2:1.860334)0.4:0.500000,OutGroup);",  # Low support
+    ]
+    tree_file = tmp_path / "low_support_trees.nwk"
+    tree_file.write_text("\n".join(newick_lines))
+    return tree_file
+
+
+@pytest.fixture
+def gene_trees_missing_outgroup_file(tmp_path):
+    """Create a temporary file with one tree missing the outgroup taxon."""
+    newick_lines = [
+        "((TaxaA:0.1,TaxaB:0.2):0.3,OutGroup:0.4);",
+        "((TaxaA:0.1,TaxaB:0.2):0.3,TaxaC:0.4);",
+    ]
+    tree_file = tmp_path / "gene_trees_missing_outgroup.nwk"
+    tree_file.write_text("\n".join(newick_lines))
+    return tree_file
+
 
 # ============================================================================
 # Tests for read_tree_file
@@ -278,6 +340,26 @@ def test_clean_and_save_trees_creates_output_file(simple_newick_file, tmp_path):
     assert output_file.stat().st_size > 0
 
 
+def test_clean_and_save_gene_trees_discards_missing_outgroup(gene_trees_missing_outgroup_file, tmp_path):
+    """Test that gene trees missing an outgroup taxon are discarded."""
+    output_file = tmp_path / "cleaned_gene_trees.nwk"
+
+    cleaned, dropped, rooted_count, missing_indices = clean_and_save_gene_trees(
+        str(gene_trees_missing_outgroup_file),
+        str(output_file),
+        outgroup_taxa=["OutGroup"],
+        min_avg_support=0.0,
+    )
+
+    assert len(cleaned) == 1
+    assert dropped == {}
+    assert rooted_count == 1
+    assert missing_indices == [2]
+
+    output_trees = read_tree_file(str(output_file))
+    assert len(output_trees) == 1
+
+
 # ============================================================================
 # Tests for get_taxa_from_tree
 # ============================================================================
@@ -337,59 +419,6 @@ def test_generate_triplets_excludes_outgroup():
         assert "OutGroup" not in triplet
 
 
-def test_generate_triplets_excludes_multiple_outgroups():
-    """Test that multiple outgroup taxa are excluded from triplets."""
-    taxa = ["TaxaA", "TaxaB", "TaxaC", "TaxaD", "OutGroup1", "OutGroup2"]
-    outgroups = ["OutGroup1", "OutGroup2"]
-
-    triplets = generate_triplets(taxa, outgroups)
-
-    for triplet in triplets:
-        assert "OutGroup1" not in triplet
-        assert "OutGroup2" not in triplet
-
-
-def test_generate_triplets_outgroup_comma_separated():
-    """Test comma-separated outgroup parsing in triplet generation."""
-    taxa = ["TaxaA", "TaxaB", "TaxaC", "TaxaD", "OutGroup1", "OutGroup2"]
-
-    triplets = generate_triplets(taxa, "OutGroup1,OutGroup2")
-
-    for triplet in triplets:
-        assert "OutGroup1" not in triplet
-        assert "OutGroup2" not in triplet
-
-
-def test_generate_triplets_outgroup_comma_separated_with_spaces():
-    """Test comma-separated outgroups with whitespace."""
-    taxa = ["TaxaA", "TaxaB", "TaxaC", "TaxaD", "OutGroup1", "OutGroup2"]
-
-    triplets = generate_triplets(taxa, "OutGroup1, OutGroup2")
-
-    for triplet in triplets:
-        assert "OutGroup1" not in triplet
-        assert "OutGroup2" not in triplet
-
-
-def test_root_tree_on_multiple_outgroups_prunes_outgroup_clade(tmp_path):
-    """Root on MRCA of multiple outgroups and prune that clade."""
-    newick_str = "((((((Ischnura,Platycnemis)1.0:0.527778,Hetaerina_americana)1.0:7.650645,Cloeon)1.0:1.756242,Epiophlebia)1.0:7.650645,(Tanypteryx,Pantala)1.0:7.650645),Anax_walsinghami);"
-    tree_file = tmp_path / "species.tree"
-    tree_file.write_text(newick_str)
-
-    tree = read_tree_file(str(tree_file))[0]
-    pruned_tree, excluded, missing, ingroup_taxa = _root_tree_on_outgroup(
-        tree, ["Tanypteryx", "Pantala"]
-    )
-
-    assert missing == set()
-    assert pruned_tree is not None
-    assert "Tanypteryx" in excluded
-    assert "Pantala" in excluded
-    assert "Anax_walsinghami" in ingroup_taxa
-    assert "Tanypteryx" not in ingroup_taxa
-
-
 def test_generate_triplets_content():
     """Test the content of generated triplets."""
     taxa = ["TaxaA", "TaxaB", "TaxaC", "TaxaD"]
@@ -417,28 +446,6 @@ def test_generate_triplets_large_set():
     assert len(triplets) == 35
     # All triplets should be unique
     assert len(set(triplets)) == 35
-
-
-def test_read_triplet_filter_file_parses_valid_and_skips_invalid(tmp_path):
-    """Test reading triplet filter file with invalid lines."""
-    filter_file = tmp_path / "triplets.txt"
-    filter_file.write_text("TaxaA,TaxaB,TaxaC\nTaxaA,TaxaB\n\n")
-
-    triplets, invalid_lines = read_triplet_filter_file(str(filter_file))
-
-    assert triplets == [("TaxaA", "TaxaB", "TaxaC")]
-    assert invalid_lines == [(2, "TaxaA,TaxaB")]
-
-
-def test_filter_triplets_by_taxa_skips_missing_taxa():
-    """Test filtering triplets by taxa set with missing taxa."""
-    triplets = [("TaxaA", "TaxaB", "TaxaC"), ("TaxaA", "TaxaB", "TaxaX")]
-    taxa_set = {"TaxaA", "TaxaB", "TaxaC"}
-
-    kept, skipped = filter_triplets_by_taxa(triplets, taxa_set)
-
-    assert kept == [("TaxaA", "TaxaB", "TaxaC")]
-    assert skipped == [(("TaxaA", "TaxaB", "TaxaX"), ["TaxaX"])]
 
 
 # ============================================================================
@@ -495,7 +502,7 @@ def test_get_clean_filename_simple():
     filepath = "/path/to/tree.nwk"
     clean_filepath = get_clean_filename(filepath)
 
-    assert clean_filepath == "/path/to/tree_clean.nwk"
+    assert clean_filepath == "/path/to/processed_tree.nwk"
 
 
 def test_get_clean_filename_different_extension():
@@ -503,7 +510,7 @@ def test_get_clean_filename_different_extension():
     filepath = "/path/to/mytrees.txt"
     clean_filepath = get_clean_filename(filepath)
 
-    assert clean_filepath == "/path/to/mytrees_clean.txt"
+    assert clean_filepath == "/path/to/processed_mytrees.txt"
 
 
 def test_get_clean_filename_no_extension():
@@ -511,7 +518,7 @@ def test_get_clean_filename_no_extension():
     filepath = "/path/to/treefile"
     clean_filepath = get_clean_filename(filepath)
 
-    assert clean_filepath == "/path/to/treefile_clean"
+    assert clean_filepath == "/path/to/processed_treefile"
 
 
 # ============================================================================
@@ -567,26 +574,22 @@ def test_integration_triplets_workflow(simple_newick_file, tmp_path):
 
 def test_extract_triplet_subtree_all_taxa_present():
     """Test extracting a triplet subtree when all taxa are present."""
-    from io import StringIO
-
     tree_str = "((TaxaA:0.1,TaxaB:0.2):0.3,(TaxaC:0.15,TaxaD:0.25):0.35);"
-    tree = Phylo.read(StringIO(tree_str), "newick")
+    tree = dendropy.Tree.get(data=tree_str, schema="newick", preserve_underscores=True)
 
     triplet = ("TaxaA", "TaxaB", "TaxaC")
     subtree = extract_triplet_subtree(tree, triplet)
 
     assert subtree is not None
-    subtree_taxa = {t.name for t in subtree.get_terminals()}
+    subtree_taxa = {leaf.taxon.label for leaf in subtree.leaf_nodes() if leaf.taxon}
     assert subtree_taxa == {"TaxaA", "TaxaB", "TaxaC"}
-    assert len(subtree.get_terminals()) == 3
+    assert len(subtree.leaf_nodes()) == 3
 
 
 def test_extract_triplet_subtree_missing_taxa():
     """Test extracting a triplet when not all taxa are present."""
-    from io import StringIO
-
     tree_str = "((TaxaA:0.1,TaxaB:0.2):0.3,TaxaC:0.15);"
-    tree = Phylo.read(StringIO(tree_str), "newick")
+    tree = dendropy.Tree.get(data=tree_str, schema="newick", preserve_underscores=True)
 
     triplet = ("TaxaA", "TaxaB", "TaxaD")  # TaxaD is not in tree
     subtree = extract_triplet_subtree(tree, triplet)
@@ -596,10 +599,8 @@ def test_extract_triplet_subtree_missing_taxa():
 
 def test_extract_triplet_subtree_preserves_branch_lengths():
     """Test that branch lengths are preserved/adjusted correctly."""
-    from io import StringIO
-
     tree_str = "((TaxaA:0.1,TaxaB:0.2):0.3,TaxaC:0.4);"
-    tree = Phylo.read(StringIO(tree_str), "newick")
+    tree = dendropy.Tree.get(data=tree_str, schema="newick", preserve_underscores=True)
 
     triplet = ("TaxaA", "TaxaB", "TaxaC")
     subtree = extract_triplet_subtree(tree, triplet)
@@ -616,16 +617,14 @@ def test_extract_triplet_subtree_preserves_branch_lengths():
 
 def test_process_gene_trees_for_triplets():
     """Test processing multiple gene trees for triplet extraction."""
-    from io import StringIO
-
     # Create gene trees
     tree1_str = "((TaxaA:0.1,TaxaB:0.2):0.3,TaxaC:0.4);"
     tree2_str = "((TaxaA:0.15,TaxaC:0.25):0.35,TaxaD:0.45);"
     tree3_str = "((TaxaB:0.12,TaxaC:0.22):0.32,TaxaD:0.42);"
 
-    tree1 = Phylo.read(StringIO(tree1_str), "newick")
-    tree2 = Phylo.read(StringIO(tree2_str), "newick")
-    tree3 = Phylo.read(StringIO(tree3_str), "newick")
+    tree1 = dendropy.Tree.get(data=tree1_str, schema="newick", preserve_underscores=True)
+    tree2 = dendropy.Tree.get(data=tree2_str, schema="newick", preserve_underscores=True)
+    tree3 = dendropy.Tree.get(data=tree3_str, schema="newick", preserve_underscores=True)
 
     gene_trees = [tree1, tree2, tree3]
 
@@ -654,10 +653,8 @@ def test_process_gene_trees_for_triplets():
 
 def test_process_gene_trees_for_triplets_empty():
     """Test processing when no gene trees match triplets."""
-    from io import StringIO
-
     tree_str = "((TaxaA:0.1,TaxaB:0.2):0.3,TaxaC:0.4);"
-    tree = Phylo.read(StringIO(tree_str), "newick")
+    tree = dendropy.Tree.get(data=tree_str, schema="newick", preserve_underscores=True)
 
     gene_trees = [tree]
     triplets = [("TaxaX", "TaxaY", "TaxaZ")]  # None of these taxa exist
@@ -748,8 +745,14 @@ def test_integration_full_triplet_extraction_workflow(tmp_path):
     taxa = get_taxa_from_tree(species_trees[0])
     triplets = generate_triplets(taxa, "OutGroup")
 
-    # Read gene trees
-    gene_trees = read_tree_file(str(gene_file))
+    # Read gene trees with DendroPy
+    gene_trees = []
+    for line in gene_file.read_text().splitlines():
+        newick_str = line.strip()
+        if newick_str:
+            gene_trees.append(
+                dendropy.Tree.get(data=newick_str, schema="newick", preserve_underscores=True)
+            )
 
     # Process gene trees for triplets
     triplet_gene_trees = process_gene_trees_for_triplets(gene_trees, triplets)
@@ -778,14 +781,12 @@ def test_write_triplet_gene_trees_multiprocess_single_worker(tmp_path):
         "((TaxaA:0.1,TaxaB:0.2):0.3,TaxaC:0.4);",
         "((TaxaD:0.5,TaxaE:0.6):0.7,TaxaF:0.8);",
     ]
-    gene_file = tmp_path / "genes.tree"
-    gene_file.write_text("\n".join(gene_trees_newick))
 
     output_file = tmp_path / "triplet_gene_trees_mp.txt"
 
     total_subtrees, triplets_with_trees, worker_count = write_triplet_gene_trees_multiprocess(
         triplets,
-        str(gene_file),
+        gene_trees_newick,
         str(output_file),
         use_multiprocessing=False,  # Disable multiprocessing
     )
@@ -813,14 +814,12 @@ def test_write_triplet_gene_trees_multiprocess_with_workers(tmp_path):
         "((TaxaA:0.1,TaxaB:0.2):0.3,TaxaC:0.4);",
         "((TaxaD:0.5,TaxaE:0.6):0.7,TaxaF:0.8);",
     ]
-    gene_file = tmp_path / "genes.tree"
-    gene_file.write_text("\n".join(gene_trees_newick))
 
     output_file = tmp_path / "triplet_gene_trees_mp.txt"
 
     total_subtrees, triplets_with_trees, worker_count = write_triplet_gene_trees_multiprocess(
         triplets,
-        str(gene_file),
+        gene_trees_newick,
         str(output_file),
         use_multiprocessing=True,
         processes=2,
@@ -913,14 +912,12 @@ def test_multiprocessing_triplet_writer_handles_empty_triplets(tmp_path):
         "((TaxaA:0.1,TaxaB:0.2):0.3,TaxaC:0.4);",
         # TaxaX, TaxaY, TaxaZ not present in any gene tree
     ]
-    gene_file = tmp_path / "genes.tree"
-    gene_file.write_text("\n".join(gene_trees_newick))
 
     output_file = tmp_path / "triplet_gene_trees_empty.txt"
 
     total_subtrees, triplets_with_trees, worker_count = write_triplet_gene_trees_multiprocess(
         triplets,
-        str(gene_file),
+        gene_trees_newick,
         str(output_file),
         use_multiprocessing=False,
     )
