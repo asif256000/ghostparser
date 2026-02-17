@@ -10,6 +10,7 @@ A phylogenetic tree parser for identifying ghost introgressions. This tool proce
 - **Triplet Generation**: Generates all unique triplet combinations from taxa (nC3)
 - **Triplet Subtree Extraction**: Extracts subtrees from gene trees for each triplet with proper branch length calculations
 - **Low-Memory Parallel Triplets**: Processes triplet chunks in parallel while streaming gene trees from disk to avoid large in-memory triplet maps
+- **Triplet Classification Pipeline**: Runs GhostParser Fig. 6 DCT + THT + median decision logic for each triplet
 
 ## Quick Start
 
@@ -47,8 +48,9 @@ The tool generates these output files:
 
 1. **`processed_<species_tree>`** - Processed species tree with support values removed and outgroup rooting applied
 2. **`processed_<gene_trees>`** - Processed gene trees with support values removed and outgroup rooting applied
-3. **`unique_triplets_gene_trees.txt`** - Triplet combinations with their corresponding gene trees
+3. **`unique_triplets_gene_trees.txt`** - Triplets normalized to `A,B,C` (with `A,B` as species sisters), with gene-tree count and species-triplet subtree in header
 4. **`metrics.txt`** - Metrics log with warnings, timings, and counts
+5. **`triplet_introgression_results.tsv`** - Final triplet-level classification results (`no_introgression`, `outflow_introgression`, `inflow_introgression`, `ghost_introgression`, or `unresolved`)
 
 ## Example
 
@@ -92,13 +94,13 @@ generation and logged as a warning (including the full list of excluded taxa) in
 **Output** (`unique_triplets_gene_trees.txt`):
 
 ```
-TaxaA,TaxaB,TaxaC	2
+TaxaA,TaxaB,TaxaC	2	((TaxaA:0.1,TaxaB:0.2):0.3,TaxaC:0.4);
 
 ((TaxaA:0.15,TaxaB:0.25):0.35,TaxaC:0.45);
 ((TaxaA:0.13,TaxaB:0.24):0.35,TaxaC:0.46):0.57;
 
 
-TaxaA,TaxaC,TaxaD	1
+TaxaA,TaxaC,TaxaD	1	((TaxaA:0.1,TaxaC:0.2):0.3,TaxaD:0.4);
 
 ((TaxaA:0.11,TaxaC:0.22):0.33,TaxaD:0.44);
 ```
@@ -107,6 +109,56 @@ TaxaA,TaxaC,TaxaD	1
 
 - **[Module Documentation](ghostparser/GHOSTPARSER.md)** - Detailed API documentation for all functions
 - **[Test Documentation](tests/TESTS.md)** - Comprehensive test suite details and categories
+
+## Triplet Processing (Fig. 6)
+
+After generating `unique_triplets_gene_trees.txt` with `tree_parser`, run:
+
+```bash
+python -m ghostparser.triplet_processor -i unique_triplets_gene_trees.txt
+```
+
+Optional thresholds and output path:
+
+```bash
+python -m ghostparser.triplet_processor \
+    -i unique_triplets_gene_trees.txt \
+    -o triplet_introgression_results.tsv \
+    --alpha-dct 0.01 \
+    --alpha-ks 0.05
+```
+
+Triplet topology convention in `triplet_processor`:
+
+- triplets are treated as `A,B,C` where `A,B` are species sisters
+- inference uses species-anchored roles: `con` always matches the species topology, and `dis1`/`dis2` are the two discordant topologies
+- for reporting, topologies are also ranked by frequency (`top1/top2/top3`), and any highest-frequency topology is tagged as `[highest freq]`
+- if species-concordant topology is not highest-frequency, `con` is additionally tagged as `[diff]`
+
+## End-to-End Orchestrator
+
+Run the full pipeline (tree parsing + per-triplet inference) in one command:
+
+```bash
+python -m ghostparser.orchestrator -st species.tree -gt genes.tree -og OutGroup
+```
+
+Optional parallelism control:
+
+```bash
+python -m ghostparser.orchestrator -st species.tree -gt genes.tree -og OutGroup -p 0
+```
+
+Notes:
+
+- `-p 0` uses all available CPU cores
+- `--no-multiprocessing` forces single-worker execution
+
+Primary orchestrator outputs:
+
+- `unique_triplets_gene_trees.txt` (triplet headers + extracted gene trees)
+- `orchestrator_triplet_results.tsv` (final per-triplet inference/statistics table)
+- `metrics.txt` (run log, counts, timings, warnings)
 
 ## Testing
 
