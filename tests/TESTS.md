@@ -208,3 +208,45 @@ This file summarizes inputs, outputs, and intent for each test function. Shared 
 	- Output: newick endswith ";"
 	- Purpose: format output.
 
+## Triplet Processing Pipeline (tests/test_triplet_processor.py)
+
+- test_compute_tree_height_statistic_matches_definition
+	- Inputs: rooted triplet tree with known branch lengths
+	- Output: `H(T)` equals average root-to-tip distance
+	- Purpose: validate corrected tree-height computation.
+
+- test_classify_triplet_topology_for_all_three_topologies
+	- Inputs: rooted trees for `con`, `dis1`, and `dis2`
+	- Output: correct topology labels for species triplet `(A,B,C)`
+	- Purpose: verify topology classification.
+
+- test_two_sided_discordant_z_test_balanced_counts_not_significant
+	- Inputs: equal discordant counts
+	- Output: `z=0`, `p=1`
+	- Purpose: validate DCT baseline behavior.
+
+- test_run_triplet_pipeline_no_introgression_when_dct_not_significant
+	- Inputs: balanced discordant trees
+	- Output: `classification == no_introgression`
+	- Purpose: verify early stop after DCT.
+
+- test_run_triplet_pipeline_outflow_when_ks_not_significant
+	- Inputs: significant DCT with similar `H(T)` distributions
+	- Output: `classification == outflow_introgression`
+	- Purpose: verify THT non-significant branch.
+
+- test_run_triplet_pipeline_inflow_when_con_median_higher
+	- Inputs: significant DCT and KS, with `median(H_con) > median(H_dis)`
+	- Output: `classification == inflow_introgression`
+	- Purpose: verify inflow decision rule.
+
+- test_run_triplet_pipeline_ghost_when_dis_median_higher
+	- Inputs: significant DCT and KS, with `median(H_con) < median(H_dis)`
+	- Output: `classification == ghost_introgression`
+	- Purpose: verify ghost decision rule.
+
+- test_parse_analyze_and_write_pipeline_roundtrip
+	- Inputs: small `unique_triplets_gene_trees.txt` fixture
+	- Output: parse + analyze + write TSV succeed with expected fields
+	- Purpose: validate file-oriented pipeline workflow.
+
