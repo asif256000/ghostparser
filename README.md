@@ -153,12 +153,16 @@ Notes:
 
 - `-p 0` uses all available CPU cores
 - `--no-multiprocessing` forces single-worker execution
+- `--log-triplet-gene-trees` enables debug logging of generated triplets and extracted gene trees to `unique_triplets_gene_trees.txt`
 
 Primary orchestrator outputs:
 
-- `unique_triplets_gene_trees.txt` (triplet headers + extracted gene trees)
 - `orchestrator_triplet_results.tsv` (final per-triplet inference/statistics table)
 - `metrics.txt` (run log, counts, timings, warnings)
+
+Optional debug output:
+
+- `unique_triplets_gene_trees.txt` (only when `--log-triplet-gene-trees` is used)
 
 ## Testing
 
