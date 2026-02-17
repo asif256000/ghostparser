@@ -25,9 +25,11 @@ from ghostparser.tree_parser import (
     read_tree_file,
     remove_support_values,
     standardize_tree,
+    _build_species_triplet_metadata,
     write_clean_trees,
     write_triplet_gene_trees,
     write_triplet_gene_trees_multiprocess,
+    write_triplet_gene_trees_streaming,
     write_triplets_to_file,
 )
 
@@ -706,6 +708,22 @@ def test_write_triplet_gene_trees(tmp_path):
     assert "TaxaD,TaxaE,TaxaF\t1" in lines[6]
 
 
+def test_write_triplet_gene_trees_includes_species_tree_header(tmp_path):
+    """Test writing species triplet subtree in header with count."""
+    triplet_gene_trees = {
+        ("TaxaA", "TaxaB", "TaxaC"): ["(TaxaA:0.1,TaxaB:0.2,TaxaC:0.3);"]
+    }
+    species_triplet_trees = {
+        ("TaxaA", "TaxaB", "TaxaC"): "((TaxaA:1,TaxaB:1):1,TaxaC:1);"
+    }
+
+    output_file = tmp_path / "triplet_gene_trees_species_header.txt"
+    write_triplet_gene_trees(triplet_gene_trees, str(output_file), species_triplet_trees=species_triplet_trees)
+
+    header = output_file.read_text().splitlines()[0]
+    assert header == "TaxaA,TaxaB,TaxaC\t1\t((TaxaA:1,TaxaB:1):1,TaxaC:1);"
+
+
 def test_write_triplet_gene_trees_empty_triplet(tmp_path):
     """Test writing when a triplet has no gene trees."""
     triplet_gene_trees = {
@@ -840,6 +858,27 @@ def test_write_triplet_gene_trees_multiprocess_with_workers(tmp_path):
     content = output_file.read_text()
     assert "TaxaA,TaxaB,TaxaC" in content
     assert "TaxaD,TaxaE,TaxaF" in content
+
+
+def test_write_triplet_gene_trees_multiprocess_includes_species_header(tmp_path):
+    """Test multiprocess writer includes species subtree in each triplet header."""
+    triplets = [("TaxaA", "TaxaB", "TaxaC")]
+    gene_trees_newick = ["((TaxaA:0.1,TaxaB:0.2):0.3,TaxaC:0.4);"]
+    species_triplet_trees = {
+        ("TaxaA", "TaxaB", "TaxaC"): "((TaxaA:1,TaxaB:1):1,TaxaC:1);"
+    }
+
+    output_file = tmp_path / "triplet_gene_trees_mp_species_header.txt"
+    write_triplet_gene_trees_multiprocess(
+        triplets,
+        gene_trees_newick,
+        str(output_file),
+        species_triplet_trees=species_triplet_trees,
+        use_multiprocessing=False,
+    )
+
+    first_line = output_file.read_text().splitlines()[0]
+    assert first_line == "TaxaA,TaxaB,TaxaC\t1\t((TaxaA:1,TaxaB:1):1,TaxaC:1);"
 
 
 def test_metrics_logger_context_manager(tmp_path):
@@ -1107,6 +1146,24 @@ def test_write_triplet_gene_trees_separator(tmp_path):
 
     content = output_file.read_text()
     assert "=" * 60 in content
+
+
+def test_build_species_triplet_metadata_normalizes_abc(tmp_path):
+    """Species triplets should be normalized so A and B are sisters."""
+    species_tree = dendropy.Tree.get(
+        data="((TaxaB:0.1,TaxaA:0.2):0.3,TaxaC:0.4);",
+        schema="newick",
+        preserve_underscores=True,
+    )
+
+    normalized_triplets, species_triplet_trees, skipped = _build_species_triplet_metadata(
+        species_tree,
+        [("TaxaA", "TaxaB", "TaxaC")],
+    )
+
+    assert skipped == []
+    assert normalized_triplets == [("TaxaA", "TaxaB", "TaxaC")]
+    assert ("TaxaA", "TaxaB", "TaxaC") in species_triplet_trees
 
 
 def test_format_newick_with_precision_triplet_parser():
