@@ -26,6 +26,7 @@ venv/
 *.tree
 *.trees
 *.txt
+*.tsv
 *.out
 
 # Scripts
