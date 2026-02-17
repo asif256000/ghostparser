@@ -1,6 +1,6 @@
 # Ghostparser Module Documentation
 
-Detailed documentation for the `ghostparser.tree_parser` module.
+Detailed documentation for the `ghostparser.tree_parser` and `ghostparser.triplet_processor` modules.
 
 ## Overview
 
@@ -13,6 +13,88 @@ file.
 
 For very large datasets, triplet processing parallelizes over triplet chunks and streams gene trees from disk,
 keeping memory bounded to the active triplet chunk.
+
+The `triplet_processor` module consumes `unique_triplets_gene_trees.txt` and applies the Figure 6 decision pipeline:
+
+1. Classify rooted triplet topologies relative to species topology (`con`, `dis1`, `dis2`).
+2. Compute `H(T)` as the average root-to-tip distance.
+3. Run discordant count test (two-sided Z test, alpha `0.01`).
+4. If significant, run two-sample KS tree-height test (alpha `0.05`).
+5. If significant, compare medians to infer inflow vs ghost introgression.
+
+Triplet sections in `unique_triplets_gene_trees.txt` are written as:
+
+- `A,B,C<TAB>gene_tree_count<TAB>species_triplet_tree_newick`
+
+where `A` and `B` are species sisters for that triplet.
+
+## Triplet Processor Module (`ghostparser.triplet_processor`)
+
+### `compute_tree_height_statistic(tree)`
+
+Computes the triplet tree-height statistic:
+
+`H(T) = mean(root-to-tip distances)`.
+
+For `((X:b2,Y:b3):b4,Z:b1)`, this is:
+
+`H(T) = (b1 + b2 + b3 + 2*b4) / 3`.
+
+### `classify_triplet_topology(tree, species_triplet)`
+
+Classifies rooted triplet topology relative to `(A,B,C)`:
+
+- `con`: `((A,B),C)`
+- `dis1`: `((B,C),A)`
+- `dis2`: `((A,C),B)`
+
+### `run_triplet_pipeline(species_triplet, triplet_gene_trees, alpha_dct=0.01, alpha_ks=0.05)`
+
+Runs full sequential GhostParser logic and returns counts, topology ranking metadata, p-values, medians, and final classification.
+
+Topology convention:
+
+- Inference convention (species-anchored):
+   - `con`: topology matching rooted species triplet
+   - `dis1`/`dis2`: the two discordant topologies; `dis1` is the more frequent discordant one (ties random)
+- Reporting convention:
+   - `top1`/`top2`/`top3`: frequency ranking across all three topologies
+   - any topology with maximal count is tagged `[highest freq]`
+   - if `con` is not highest-frequency, output marks `con` as `[diff]`
+
+Possible `classification` values:
+
+- `no_introgression`
+- `outflow_introgression`
+- `inflow_introgression`
+- `ghost_introgression`
+- `unresolved`
+
+### `parse_triplet_gene_trees_file(filepath)`
+
+Parses `unique_triplets_gene_trees.txt` into a dictionary:
+
+- triplet -> `{count, species_tree, gene_trees}`
+
+### `analyze_triplet_gene_tree_file(filepath, alpha_dct=0.01, alpha_ks=0.05)`
+
+Runs the pipeline for all triplets in an input file.
+
+### `write_pipeline_results(results, output_filepath)`
+
+Writes per-triplet results to a TSV file with counts, DCT and KS statistics, medians, and classification.
+
+### CLI usage
+
+```bash
+python -m ghostparser.triplet_processor -i unique_triplets_gene_trees.txt
+```
+
+Optional arguments:
+
+- `-o/--output`: output TSV path (default: `triplet_introgression_results.tsv` next to input)
+- `--alpha-dct`: DCT threshold (default: `0.01`)
+- `--alpha-ks`: KS threshold (default: `0.05`)
 
 ## Module Functions
 
