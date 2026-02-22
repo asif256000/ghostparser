@@ -34,3 +34,6 @@ ghostparser*.sh
 
 # Documents
 *.pdf
+
+# Configurations
+configs/
