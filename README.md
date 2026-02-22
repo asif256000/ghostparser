@@ -1,16 +1,17 @@
 # Ghostparser
 
-A phylogenetic tree parser for identifying ghost introgressions. This tool processes Newick format trees, standardizes them, and extracts triplet subtrees from gene trees for downstream analysis.
+A summary-statistics based phylogenetic tool for identifying introgressions in reasonably large phylogenetic dataset. This tool processes Newick format trees (species and genes), standardizes them, and extracts triplet subtrees from gene trees for downstream analysis. In the end, it runs a triplet-based pipeline to classify introgression types for each triplet of taxa.
 
 ## Features
 
-- **Tree Standardization**: Removes support values (bootstrap/posterior probabilities) from phylogenetic trees
-- **Quality Filtering**: Filters out trees with average support < 0.5
-- **High-Precision Branch Lengths**: Preserves branch lengths with 10 decimal places, removes trailing zeros
-- **Triplet Generation**: Generates all unique triplet combinations from taxa (nC3)
-- **Triplet Subtree Extraction**: Extracts subtrees from gene trees for each triplet with proper branch length calculations
-- **Low-Memory Parallel Triplets**: Processes triplet chunks in parallel while streaming gene trees from disk to avoid large in-memory triplet maps
-- **Triplet Classification Pipeline**: Runs GhostParser Fig. 6 DCT + THT + median decision logic for each triplet
+- **Tree Standardization**: Removes support values (bootstrap/posterior probabilities) from phylogenetic trees.
+- **Quality Filtering**: Filters out trees with average support less than configured value.
+- **High-Precision Branch Lengths**: Preserves branch lengths with 10 decimal places, removes trailing zeros.
+- **Triplet Generation**: Generates all unique triplet combinations from taxa (nC3).
+- **Triplet Subtree Extraction**: Extracts subtrees from gene trees for each triplet with proper branch length calculations.
+- **Low-Memory Parallel Triplets**: Processes triplet chunks in parallel while streaming gene trees from disk to avoid large in-memory triplet maps.
+- **Triplet Classification Pipeline**: Classifies introgression types for each triplet based on gene tree frequencies and tree height distributions.
+- **Config File Support**: Allows running the full pipeline from a JSON/YAML config file with all parameters specified.
 
 ## Quick Start
 
@@ -20,6 +21,21 @@ A phylogenetic tree parser for identifying ghost introgressions. This tool proce
 pip install -r requirements.txt
 ```
 
+### Installation (Poetry 2.x+)
+
+If you prefer Poetry 2.x+ instead of plain pip:
+
+```bash
+poetry install
+```
+
+Run commands with Poetry:
+
+```bash
+poetry run pytest -q
+poetry run python -m ghostparser.orchestrator -c run_config.yaml
+```
+
 ### Basic Usage
 
 ```bash
@@ -27,6 +43,8 @@ python -m ghostparser.tree_parser -st species.tree -gt genes.tree -og OutGroup
 ```
 
 ### Arguments
+
+The arguments below are for `tree_parser`:
 
 **Required:**
 - `-st, --species_tree`: Path to the species tree file in Newick format
@@ -38,7 +56,7 @@ python -m ghostparser.tree_parser -st species.tree -gt genes.tree -og OutGroup
 - `-tf, --triplet-filter`: Path to a triplet filter file (comma-separated taxa per line). When provided, only those
     triplets are processed. Triplets containing taxa missing from the species tree are skipped with a warning.
 - `-p, --processes`: Number of worker processes for multiprocessing (only used with `-p/--processes`).
-                    Defaults to cpu_count(). Ignored if `--no-multiprocessing` is set.
+                    Defaults to `0` (all cores). Ignored if `--no-multiprocessing` is set.
 - `--no-multiprocessing`: Disable multiprocessing. Processes triplets sequentially using a single worker.
                          Useful for debugging or on systems with limited resources.
 
@@ -48,7 +66,7 @@ The tool generates these output files:
 
 1. **`processed_<species_tree>`** - Processed species tree with support values removed and outgroup rooting applied
 2. **`processed_<gene_trees>`** - Processed gene trees with support values removed and outgroup rooting applied
-3. **`unique_triplets_gene_trees.txt`** - Triplets normalized to `A,B,C` (with `A,B` as species sisters), with gene-tree count and species-triplet subtree in header
+3. **`unique_triplets_gene_trees.txt`** - Triplets normalized to `A,B,C` (with `A,B` as species sisters), with required header format `triplet<TAB>count<TAB>species_tree` (non-empty species subtree)
 4. **`metrics.txt`** - Metrics log with warnings, timings, and counts
 5. **`triplet_introgression_results.tsv`** - Final triplet-level classification results (`no_introgression`, `outflow_introgression`, `inflow_introgression`, `ghost_introgression`, or `unresolved`)
 
@@ -108,7 +126,11 @@ TaxaA,TaxaC,TaxaD	1	((TaxaA:0.1,TaxaC:0.2):0.3,TaxaD:0.4);
 ## Documentation
 
 - **[Module Documentation](ghostparser/GHOSTPARSER.md)** - Detailed API documentation for all functions
+- **[Orchestrator Module Guide](ghostparser/ORCHESTRATOR.md)** - End-to-end orchestrator inputs, outputs, and result columns
 - **[Test Documentation](tests/TESTS.md)** - Comprehensive test suite details and categories
+- **[Configuration Guide](CONFIG.md)** - Config file options and examples for orchestrator
+
+Note: module-specific guides live under the [ghostparser](ghostparser/) folder.
 
 ## Triplet Processing (Fig. 6)
 
@@ -128,12 +150,23 @@ python -m ghostparser.triplet_processor \
     --alpha-ks 0.05
 ```
 
+Optional multiprocessing for `triplet_processor`:
+
+```bash
+python -m ghostparser.triplet_processor \
+    -i unique_triplets_gene_trees.txt \
+    -p 0
+```
+
+- `-p` defaults to `0`, which uses all available CPU cores
+- `--no-multiprocessing` forces single-worker analysis
+
 Triplet topology convention in `triplet_processor`:
 
 - triplets are treated as `A,B,C` where `A,B` are species sisters
-- inference uses species-anchored roles: `con` always matches the species topology, and `dis1`/`dis2` are the two discordant topologies
-- for reporting, topologies are also ranked by frequency (`top1/top2/top3`), and any highest-frequency topology is tagged as `[highest freq]`
-- if species-concordant topology is not highest-frequency, `con` is additionally tagged as `[diff]`
+- `con` is the species-matching topology (`((A,B),C)`), `dis1` is the more frequent discordant topology, and `dis2` is the less frequent discordant topology (on ties, first discordant topology is used as `dis1`)
+- output includes `most_frequent_matches_concordant` (`True` when concordant frequency is not lower than either discordant frequency)
+- output includes `species_tree` (the extracted species-tree Newick for that triplet)
 
 ## End-to-End Orchestrator
 
@@ -143,7 +176,13 @@ Run the full pipeline (tree parsing + per-triplet inference) in one command:
 python -m ghostparser.orchestrator -st species.tree -gt genes.tree -og OutGroup
 ```
 
-Optional parallelism control:
+Or run from a JSON/YAML config file:
+
+```bash
+python -m ghostparser.orchestrator -c run_config.yaml
+```
+
+CLI mode (without config file):
 
 ```bash
 python -m ghostparser.orchestrator -st species.tree -gt genes.tree -og OutGroup -p 0
@@ -151,18 +190,19 @@ python -m ghostparser.orchestrator -st species.tree -gt genes.tree -og OutGroup 
 
 Notes:
 
-- `-p 0` uses all available CPU cores
-- `--no-multiprocessing` forces single-worker execution
-- `--log-triplet-gene-trees` enables debug logging of generated triplets and extracted gene trees to `unique_triplets_gene_trees.txt`
+- `-p` defaults to `0`, which uses all available CPU cores
+- `-o/--output` defaults to `./results` (current working directory)
+- `-c/--config-file` can be combined with other CLI options, but CLI values are ignored with a warning
+- use `-p 1` for effective single-worker execution
+- orchestrator runs in two stages: first generate `unique_triplets_gene_trees.txt`, then run `triplet_processor` on that file
+
+For all config keys and examples, see [CONFIG.md](CONFIG.md).
 
 Primary orchestrator outputs:
 
+- `unique_triplets_gene_trees.txt` (triplet-wise extracted gene trees used as input to stage 2)
 - `orchestrator_triplet_results.tsv` (final per-triplet inference/statistics table)
 - `metrics.txt` (run log, counts, timings, warnings)
-
-Optional debug output:
-
-- `unique_triplets_gene_trees.txt` (only when `--log-triplet-gene-trees` is used)
 
 ## Testing
 
@@ -170,12 +210,6 @@ Run all tests:
 
 ```bash
 pytest
-```
-
-Run with verbose output:
-
-```bash
-pytest -v
 ```
 
 See [tests/TESTS.md](tests/TESTS.md) for detailed test documentation.
