@@ -1,0 +1,9 @@
+{
+  "species_tree_path": "data/asuv21/species.tree",
+  "gene_trees_path": "data/asuv21/gene_trees.tree",
+  "outgroup": "Ephemera_danica,Isonychia_kiangsinensis",
+  "output_folder": "./results",
+  "processes": 0,
+  "triplet_filter": "data/asuv21/asuv_all/triplet_filter.txt",
+  "min_support_value": 0.5
+}
