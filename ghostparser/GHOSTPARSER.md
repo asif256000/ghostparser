@@ -16,7 +16,7 @@ keeping memory bounded to the active triplet chunk.
 
 The `triplet_processor` module consumes `unique_triplets_gene_trees.txt` and applies the Figure 6 decision pipeline:
 
-1. Classify rooted triplet topologies relative to species topology (`con`, `dis1`, `dis2`).
+1. Set concordant topology to species topology, and rank only discordants by observed frequency (`dis1`, `dis2`).
 2. Compute `H(T)` as the average root-to-tip distance.
 3. Run discordant count test (two-sided Z test, alpha `0.01`).
 4. If significant, run two-sample KS tree-height test (alpha `0.05`).
@@ -40,27 +40,32 @@ For `((X:b2,Y:b3):b4,Z:b1)`, this is:
 
 `H(T) = (b1 + b2 + b3 + 2*b4) / 3`.
 
-### `classify_triplet_topology(tree, species_triplet)`
+### `classify_triplet_topology(tree, species_triplet, topology_counts, species_topology=TOPOLOGY_AB)`
 
-Classifies rooted triplet topology relative to `(A,B,C)`:
+Classifies rooted triplet topology relative to `(A,B,C)` into:
 
-- `con`: `((A,B),C)`
-- `dis1`: `((B,C),A)`
-- `dis2`: `((A,C),B)`
+- `concordant`: species-matching topology
+- `discordant1`: more frequent discordant topology label (based on `topology_counts`)
+- `discordant2`: less frequent discordant topology label (based on `topology_counts`)
+- ties between discordants are resolved deterministically by picking the first discordant topology as `discordant1`
+
+Returns:
+
+- `(label, most_frequent_matches_concordant)` where `most_frequent_matches_concordant` is `True` when concordant count is not lower than either discordant count.
 
 ### `run_triplet_pipeline(species_triplet, triplet_gene_trees, alpha_dct=0.01, alpha_ks=0.05)`
 
-Runs full sequential GhostParser logic and returns counts, topology ranking metadata, p-values, medians, and final classification.
+Runs full sequential GhostParser logic and returns counts, p-values, medians, and final classification.
 
 Topology convention:
 
-- Inference convention (species-anchored):
-   - `con`: topology matching rooted species triplet
-   - `dis1`/`dis2`: the two discordant topologies; `dis1` is the more frequent discordant one (ties random)
-- Reporting convention:
-   - `top1`/`top2`/`top3`: frequency ranking across all three topologies
-   - any topology with maximal count is tagged `[highest freq]`
-   - if `con` is not highest-frequency, output marks `con` as `[diff]`
+- `con`: species-matching topology
+- `dis1`: more frequent of the two discordant topologies
+- `dis2`: less frequent of the two discordant topologies
+- ties between discordants use deterministic first-discordant ordering
+- `most_frequent_matches_concordant`: `True` when concordant frequency is not lower than either discordant frequency
+
+Output includes `species_tree` (the extracted species-tree Newick for the triplet).
 
 Possible `classification` values:
 
@@ -76,7 +81,7 @@ Parses `unique_triplets_gene_trees.txt` into a dictionary:
 
 - triplet -> `{count, species_tree, gene_trees}`
 
-### `analyze_triplet_gene_tree_file(filepath, alpha_dct=0.01, alpha_ks=0.05)`
+### `analyze_triplet_gene_tree_file(filepath, alpha_dct=0.01, alpha_ks=0.05, rng=None, use_multiprocessing=True, processes=None)`
 
 Runs the pipeline for all triplets in an input file.
 
@@ -95,6 +100,8 @@ Optional arguments:
 - `-o/--output`: output TSV path (default: `triplet_introgression_results.tsv` next to input)
 - `--alpha-dct`: DCT threshold (default: `0.01`)
 - `--alpha-ks`: KS threshold (default: `0.05`)
+- `-p/--processes`: worker count for triplet inference (`0` = all cores)
+- `--no-multiprocessing`: disable multiprocessing for triplet inference
 
 ## Module Functions
 
@@ -432,7 +439,7 @@ python -m ghostparser.tree_parser -st SPECIES_TREE -gt GENE_TREES -og OUTGROUP
 
 **Optional:**
 - `-p, --processes`: Number of worker processes for multiprocessing (only used when multiprocessing is enabled).
-                    Defaults to cpu_count(). Ignored if `--no-multiprocessing` is set.
+                    Defaults to `0` (all cores). Ignored if `--no-multiprocessing` is set.
 - `--no-multiprocessing`: Disable multiprocessing for triplet extraction.
                          Processes triplets sequentially on a single worker.
                          Useful for debugging or systems with limited memory.
