@@ -495,11 +495,26 @@ def _build_species_triplet_metadata(species_tree, triplets):
 
 
 def _format_triplet_header(triplet, count, species_tree_newick=None):
-    """Format a triplet section header with count and optional species subtree."""
+    """Format a triplet section header as ``triplet<TAB>count<TAB>species_tree``."""
+    if species_tree_newick is None or not str(species_tree_newick).strip():
+        raise ValueError(f"Missing species subtree for triplet header: {','.join(triplet)}")
+
     base = ",".join(triplet) + f"\t{count}"
-    if species_tree_newick:
-        return base + f"\t{species_tree_newick}"
-    return base
+    species_tree = str(species_tree_newick)
+    return base + f"\t{species_tree}"
+
+
+def _validate_species_triplet_trees(triplets, species_triplet_trees):
+    """Validate species subtree mapping is present and non-empty for all triplets."""
+    if species_triplet_trees is None:
+        raise ValueError("species_triplet_trees is required and cannot be None")
+
+    missing = [triplet for triplet in triplets if not str(species_triplet_trees.get(triplet, "")).strip()]
+    if missing:
+        preview = "; ".join(",".join(t) for t in missing[:5])
+        raise ValueError(f"Missing species subtree mapping for triplets: {preview}")
+
+    return species_triplet_trees
 
 
 def process_gene_trees_for_triplets(gene_trees, triplets):
@@ -527,16 +542,16 @@ def _get_mp_context():
     return mp
 
 
-_GENE_TREES_PATH = None
-_CHUNK_DIR = None
-_SPECIES_TRIPLET_TREES = None
+_GENE_TREES_PATH: str = ""
+_CHUNK_DIR: str = ""
+_SPECIES_TRIPLET_TREES: dict[tuple[str, str, str], str] = {}
 
 
 def _init_triplet_chunk_worker(gene_trees_path, chunk_dir, species_triplet_trees=None):
     """Initializer for multiprocessing triplet chunk workers."""
     global _GENE_TREES_PATH, _CHUNK_DIR, _SPECIES_TRIPLET_TREES
-    _GENE_TREES_PATH = gene_trees_path
-    _CHUNK_DIR = chunk_dir
+    _GENE_TREES_PATH = str(gene_trees_path)
+    _CHUNK_DIR = str(chunk_dir)
     _SPECIES_TRIPLET_TREES = species_triplet_trees or {}
 
 
@@ -658,7 +673,7 @@ def write_triplet_gene_trees_multiprocess(
         triplets: List of triplet tuples to process.
         gene_trees_filepath: Path to the cleaned gene trees file.
         output_filepath: Output file path for results.
-        species_triplet_trees: Optional dict mapping triplet -> species subtree Newick.
+        species_triplet_trees: Dict mapping triplet -> species subtree Newick (required).
         use_multiprocessing: Whether to use multiprocessing (default: True).
                            If False, processes sequentially on single worker.
         processes: Number of worker processes when multiprocessing is enabled.
@@ -674,6 +689,8 @@ def write_triplet_gene_trees_multiprocess(
 
     if not triplets:
         return 0, 0, 0
+
+    species_triplet_trees = _validate_species_triplet_trees(triplets, species_triplet_trees)
 
     worker_count = _calculate_worker_count(
         len(triplets),
@@ -721,7 +738,8 @@ def write_triplet_gene_trees_multiprocess(
 
 def write_triplet_gene_trees(triplet_gene_trees, output_filepath, species_triplet_trees=None):
     """Write triplet gene trees to a file in the specified format."""
-    species_triplet_trees = species_triplet_trees or {}
+    triplets = list(triplet_gene_trees.keys())
+    species_triplet_trees = _validate_species_triplet_trees(triplets, species_triplet_trees)
     with open(output_filepath, "w") as f:
         for i, (triplet, newick_trees) in enumerate(triplet_gene_trees.items()):
             count = len(newick_trees)
@@ -752,7 +770,7 @@ def write_triplet_gene_trees_streaming(
     """
     total_subtrees = 0
     triplets_with_trees = 0
-    species_triplet_trees = species_triplet_trees or {}
+    species_triplet_trees = _validate_species_triplet_trees(triplets, species_triplet_trees)
 
     with open(output_filepath, "w") as out_f:
         for idx, triplet in enumerate(triplets):
@@ -844,8 +862,8 @@ def main():
         "-p",
         "--processes",
         type=int,
-        default=None,
-        help="Number of worker processes for triplet extraction (default: cpu_count)",
+        default=0,
+        help="Number of worker processes for triplet extraction (default: 0 = all cores)",
     )
     parser.add_argument(
         "--no-multiprocessing",
@@ -899,6 +917,9 @@ def main():
         except Exception as e:
             metrics.log(f"✗ Error processing species tree: {e}")
             return
+
+        triplets = []
+        species_triplet_trees = {}
 
         try:
             if species_trees:
