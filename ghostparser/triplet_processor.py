@@ -9,9 +9,9 @@ GhostParser Figure 6 for rooted species triplets:
 4. If significant, run tree height test (two-sample KS, alpha=0.05).
 5. If significant, compare medians to classify inflow vs ghost introgression.
 
-Concordant topology is always the topology matching the rooted species triplet.
-Frequency ranking is reported separately (including ``[highest freq]`` tags)
-and does not redefine concordant/discordant roles in inference.
+Concordant topology is defined as the species-tree topology for the ABC triplet.
+The two discordant topologies are frequency-ranked as ``dis1`` (more frequent)
+and ``dis2`` (less frequent), with deterministic first-discordant tie-breaking.
 """
 
 from __future__ import annotations
@@ -20,8 +20,9 @@ import argparse
 from dataclasses import dataclass
 import json
 import math
+import multiprocessing as mp
+from multiprocessing import cpu_count
 from pathlib import Path
-import random
 
 import dendropy
 
@@ -36,6 +37,7 @@ from .triplet_utils import (
 
 
 Classification = str
+SerializedTripletObservation = tuple[str, float]
 
 
 @dataclass(frozen=True)
@@ -43,6 +45,7 @@ class TripletPipelineResult:
     """Result of running the GhostParser pipeline for one rooted species triplet."""
 
     triplet: tuple[str, str, str]
+    species_tree: str | None
     species_topology: str
     con_topology: str
     dis1_topology: str
@@ -51,7 +54,7 @@ class TripletPipelineResult:
     top2_topology: str
     top3_topology: str
     highest_freq_topologies: tuple[str, ...]
-    concordant_diff: bool
+    most_frequent_matches_concordant: bool
     n_topology_ab: int
     n_topology_bc: int
     n_topology_ac: int
@@ -66,33 +69,23 @@ class TripletPipelineResult:
     median_con: float | None
     median_dis: float | None
     classification: Classification
-    skipped_trees: int = 0
+    analyzed_trees: int = 0
 
     def to_dict(self):
         """Serialize all relevant triplet statistics to a dictionary."""
         a_taxon, b_taxon, c_taxon = self.triplet
         abc_mapping = f"A={a_taxon},B={b_taxon},C={c_taxon}"
-        con_topology_display = f"{self.con_topology} [diff]" if self.concordant_diff else self.con_topology
-
-        def _display(topology, base):
-            tagged = base
-            if topology in self.highest_freq_topologies:
-                tagged = f"{tagged} [highest freq]"
-            return tagged
 
         return {
             "triplet": self.triplet,
             "abc_mapping": abc_mapping,
-            "species_topology": self.species_topology,
+            "species_tree": self.species_tree,
             "con_topology": self.con_topology,
-            "con_topology_display": _display(self.con_topology, con_topology_display),
             "dis1_topology": self.dis1_topology,
             "dis2_topology": self.dis2_topology,
-            "dis1_topology_display": _display(self.dis1_topology, self.dis1_topology),
-            "dis2_topology_display": _display(self.dis2_topology, self.dis2_topology),
             "topology_frequency_ranking": [self.top1_topology, self.top2_topology, self.top3_topology],
             "highest_freq_topologies": list(self.highest_freq_topologies),
-            "concordant_diff": self.concordant_diff,
+            "most_frequent_matches_concordant": self.most_frequent_matches_concordant,
             "topology_counts": {
                 TOPOLOGY_AB: self.n_topology_ab,
                 TOPOLOGY_BC: self.n_topology_bc,
@@ -109,7 +102,7 @@ class TripletPipelineResult:
             "median_con": self.median_con,
             "median_dis": self.median_dis,
             "classification": self.classification,
-            "skipped_trees": self.skipped_trees,
+            "analyzed_trees": self.analyzed_trees,
         }
 
 
@@ -140,24 +133,57 @@ def compute_tree_height_statistic(tree):
     return sum(distances) / 3.0
 
 
-def classify_triplet_topology(tree, species_triplet):
-    """Classify a rooted triplet tree relative to ABC as ``con``, ``dis1``, ``dis2``.
+def classify_triplet_topology(
+    tree,
+    species_triplet,
+    topology_counts,
+    species_topology=TOPOLOGY_AB,
+):
+    """Classify topology as concordant/discordant1/discordant2.
 
-    This helper keeps backward compatibility for callers/tests. It maps from
-    canonical topology strings to short labels where:
-
-    - ``con`` -> ``((A,B),C)``
-    - ``dis1`` -> ``((B,C),A)``
-    - ``dis2`` -> ``((A,C),B)``
+    Discordant1 and discordant2 are frequency-ranked among discordant
+    topologies. Returns both the per-tree label and whether concordant is
+    most frequent overall.
     """
+    _, dis1_topology, dis2_topology, most_frequent_matches_concordant = _resolve_topology_roles(
+        topology_counts,
+        species_topology,
+    )
+
     topology = classify_triplet_topology_string(tree, species_triplet)
-    if topology == TOPOLOGY_AB:
-        return "con"
-    if topology == TOPOLOGY_BC:
-        return "dis1"
-    if topology == TOPOLOGY_AC:
-        return "dis2"
+    if topology == species_topology:
+        return "concordant", most_frequent_matches_concordant
+    if topology == dis1_topology:
+        return "discordant1", most_frequent_matches_concordant
+    if topology == dis2_topology:
+        return "discordant2", most_frequent_matches_concordant
     raise ValueError("Unknown triplet topology")
+
+
+def _resolve_topology_roles(topology_counts, species_topology):
+    """Resolve concordant/discordant roles and concordant frequency status."""
+    con_topology = species_topology
+    discordant_topologies = [topology for topology in ALL_TOPOLOGIES if topology != con_topology]
+    if len(discordant_topologies) != 2:
+        raise ValueError(f"Invalid species topology: {species_topology}")
+
+    first_discordant, second_discordant = discordant_topologies
+    first_count = int(topology_counts.get(first_discordant, 0))
+    second_count = int(topology_counts.get(second_discordant, 0))
+
+    if first_count == second_count:
+        dis1_topology, dis2_topology = first_discordant, second_discordant
+    elif first_count > second_count:
+        dis1_topology, dis2_topology = first_discordant, second_discordant
+    else:
+        dis1_topology, dis2_topology = second_discordant, first_discordant
+
+    n_con = int(topology_counts.get(con_topology, 0))
+    n_dis1 = int(topology_counts.get(dis1_topology, 0))
+    n_dis2 = int(topology_counts.get(dis2_topology, 0))
+    most_frequent_matches_concordant = n_con >= n_dis1 and n_con >= n_dis2
+
+    return con_topology, dis1_topology, dis2_topology, most_frequent_matches_concordant
 
 
 def two_sided_discordant_z_test(n_dis1, n_dis2):
@@ -275,32 +301,9 @@ def _species_topology_from_newick(species_tree_newick, abc_triplet):
     return classify_triplet_topology_string(tree, abc_triplet)
 
 
-def run_triplet_pipeline(
-    species_triplet,
-    triplet_gene_trees,
-    alpha_dct=0.01,
-    alpha_ks=0.05,
-    species_topology=TOPOLOGY_AB,
-    rng=None,
-):
-    """Run GhostParser Figure 6 pipeline for one rooted species triplet.
-
-    Args:
-        species_triplet: Tuple ``(A, B, C)`` where ``A`` and ``B`` are sisters
-            in species tree convention.
-        triplet_gene_trees: Iterable of rooted triplet gene tree Newick strings.
-        alpha_dct: Significance threshold for DCT-like Z test.
-        alpha_ks: Significance threshold for THT (KS test).
-        species_topology: Species-tree topology string for this triplet.
-        rng: Optional randomizer for tie-breaking topology ranks.
-
-    Returns:
-        ``TripletPipelineResult``.
-    """
-    randomizer = rng or random
-    heights = {topology: [] for topology in ALL_TOPOLOGIES}
-    skipped_trees = 0
-
+def _serialize_triplet_gene_trees(species_triplet, triplet_gene_trees):
+    """Parse rooted triplet trees into lightweight (topology, height) observations."""
+    observations: list[SerializedTripletObservation] = []
     species_set = set(species_triplet)
 
     for newick_str in triplet_gene_trees:
@@ -310,43 +313,50 @@ def run_triplet_pipeline(
         tree = dendropy.Tree.get(data=str(newick_str).strip(), schema="newick", preserve_underscores=True)
         labels = {leaf.taxon.label for leaf in tree.leaf_node_iter() if leaf.taxon and leaf.taxon.label}
         if labels != species_set:
-            skipped_trees += 1
             continue
 
         try:
             topology = classify_triplet_topology_string(tree, species_triplet)
             tree_height = compute_tree_height_statistic(tree)
         except ValueError:
-            skipped_trees += 1
             continue
 
+        observations.append((topology, tree_height))
+
+    return observations
+
+
+def _run_triplet_pipeline_from_observations(
+    species_triplet,
+    observations,
+    alpha_dct=0.01,
+    alpha_ks=0.05,
+    species_topology=TOPOLOGY_AB,
+    species_tree_newick=None,
+    rng=None,
+):
+    """Run GhostParser Figure 6 pipeline from lightweight serialized observations."""
+    heights = {topology: [] for topology in ALL_TOPOLOGIES}
+    for topology, tree_height in observations:
         heights[topology].append(tree_height)
 
     topology_counts = {topology: len(heights[topology]) for topology in ALL_TOPOLOGIES}
+    analyzed_trees = sum(topology_counts.values())
     top1_topology, top2_topology, top3_topology = rank_topologies_by_frequency(topology_counts, rng=rng)
 
-    con_topology = species_topology
-    discordant_topologies = [topology for topology in ALL_TOPOLOGIES if topology != species_topology]
-    count_a = topology_counts[discordant_topologies[0]]
-    count_b = topology_counts[discordant_topologies[1]]
-    if count_a > count_b:
-        dis1_topology, dis2_topology = discordant_topologies[0], discordant_topologies[1]
-    elif count_b > count_a:
-        dis1_topology, dis2_topology = discordant_topologies[1], discordant_topologies[0]
-    else:
-        shuffled = list(discordant_topologies)
-        randomizer.shuffle(shuffled)
-        dis1_topology, dis2_topology = shuffled[0], shuffled[1]
+    con_topology, dis1_topology, dis2_topology, most_frequent_matches_concordant = _resolve_topology_roles(
+        topology_counts,
+        species_topology,
+    )
 
-    max_count = max(topology_counts.values()) if topology_counts else 0
+    max_count = max(topology_counts.values())
     highest_freq_topologies = tuple(
         topology for topology in ALL_TOPOLOGIES if topology_counts[topology] == max_count
     )
-    concordant_diff = con_topology not in highest_freq_topologies
-
     n_con = topology_counts[con_topology]
     n_dis1 = topology_counts[dis1_topology]
     n_dis2 = topology_counts[dis2_topology]
+    
 
     _, dct_p_value = two_sided_discordant_z_test(n_dis1, n_dis2)
     dct_significant = dct_p_value <= alpha_dct
@@ -354,6 +364,7 @@ def run_triplet_pipeline(
     if not dct_significant:
         return TripletPipelineResult(
             triplet=species_triplet,
+            species_tree=species_tree_newick,
             species_topology=species_topology,
             con_topology=con_topology,
             dis1_topology=dis1_topology,
@@ -362,7 +373,7 @@ def run_triplet_pipeline(
             top2_topology=top2_topology,
             top3_topology=top3_topology,
             highest_freq_topologies=highest_freq_topologies,
-            concordant_diff=concordant_diff,
+            most_frequent_matches_concordant=most_frequent_matches_concordant,
             n_topology_ab=topology_counts[TOPOLOGY_AB],
             n_topology_bc=topology_counts[TOPOLOGY_BC],
             n_topology_ac=topology_counts[TOPOLOGY_AC],
@@ -377,7 +388,7 @@ def run_triplet_pipeline(
             median_con=None,
             median_dis=None,
             classification="no_introgression",
-            skipped_trees=skipped_trees,
+            analyzed_trees=analyzed_trees,
         )
 
     ks_statistic, ks_p_value = two_sample_ks_test(heights[dis1_topology], heights[con_topology])
@@ -386,6 +397,7 @@ def run_triplet_pipeline(
     if not ks_significant:
         return TripletPipelineResult(
             triplet=species_triplet,
+            species_tree=species_tree_newick,
             species_topology=species_topology,
             con_topology=con_topology,
             dis1_topology=dis1_topology,
@@ -394,7 +406,7 @@ def run_triplet_pipeline(
             top2_topology=top2_topology,
             top3_topology=top3_topology,
             highest_freq_topologies=highest_freq_topologies,
-            concordant_diff=concordant_diff,
+            most_frequent_matches_concordant=most_frequent_matches_concordant,
             n_topology_ab=topology_counts[TOPOLOGY_AB],
             n_topology_bc=topology_counts[TOPOLOGY_BC],
             n_topology_ac=topology_counts[TOPOLOGY_AC],
@@ -409,7 +421,7 @@ def run_triplet_pipeline(
             median_con=None,
             median_dis=None,
             classification="outflow_introgression",
-            skipped_trees=skipped_trees,
+            analyzed_trees=analyzed_trees,
         )
 
     median_con = _median(heights[con_topology])
@@ -426,6 +438,7 @@ def run_triplet_pipeline(
 
     return TripletPipelineResult(
         triplet=species_triplet,
+        species_tree=species_tree_newick,
         species_topology=species_topology,
         con_topology=con_topology,
         dis1_topology=dis1_topology,
@@ -434,7 +447,7 @@ def run_triplet_pipeline(
         top2_topology=top2_topology,
         top3_topology=top3_topology,
         highest_freq_topologies=highest_freq_topologies,
-        concordant_diff=concordant_diff,
+        most_frequent_matches_concordant=most_frequent_matches_concordant,
         n_topology_ab=topology_counts[TOPOLOGY_AB],
         n_topology_bc=topology_counts[TOPOLOGY_BC],
         n_topology_ac=topology_counts[TOPOLOGY_AC],
@@ -449,15 +462,50 @@ def run_triplet_pipeline(
         median_con=median_con,
         median_dis=median_dis,
         classification=classification,
-        skipped_trees=skipped_trees,
+        analyzed_trees=analyzed_trees,
+    )
+
+
+def run_triplet_pipeline(
+    species_triplet,
+    triplet_gene_trees,
+    alpha_dct=0.01,
+    alpha_ks=0.05,
+    species_topology=TOPOLOGY_AB,
+    species_tree_newick=None,
+    rng=None,
+):
+    """Run GhostParser Figure 6 pipeline for one rooted species triplet.
+
+    Args:
+        species_triplet: Tuple ``(A, B, C)`` where ``A`` and ``B`` are sisters
+            in species tree convention.
+        triplet_gene_trees: Iterable of rooted triplet gene tree Newick strings.
+        alpha_dct: Significance threshold for DCT-like Z test.
+        alpha_ks: Significance threshold for THT (KS test).
+        species_topology: Species-tree topology string for this triplet.
+        species_tree_newick: Species-tree triplet Newick string for this triplet.
+        rng: Optional randomizer for tie-breaking topology ranks.
+
+    Returns:
+        ``TripletPipelineResult``.
+    """
+    observations = _serialize_triplet_gene_trees(species_triplet, triplet_gene_trees)
+    return _run_triplet_pipeline_from_observations(
+        species_triplet,
+        observations,
+        alpha_dct=alpha_dct,
+        alpha_ks=alpha_ks,
+        species_topology=species_topology,
+        species_tree_newick=species_tree_newick,
+        rng=rng,
     )
 
 
 def parse_triplet_gene_trees_file(filepath):
     """Parse triplet gene tree file produced by ``tree_parser``.
 
-    Supports both header styles:
-    - ``A,B,C<TAB>count``
+    Required header style:
     - ``A,B,C<TAB>count<TAB>species_triplet_newick``
 
     Returns:
@@ -469,9 +517,9 @@ def parse_triplet_gene_trees_file(filepath):
 
     with open(filepath, "r") as handle:
         for raw_line in handle:
-            line = raw_line.strip()
+            line = raw_line.rstrip("\n").rstrip("\r")
 
-            if not line:
+            if not line.strip():
                 continue
 
             if set(line) == {"="}:
@@ -480,19 +528,24 @@ def parse_triplet_gene_trees_file(filepath):
 
             if "\t" in line and "," in line.split("\t", 1)[0]:
                 parts = line.split("\t")
+                if len(parts) != 3:
+                    raise ValueError(f"Invalid triplet header format (expected 3 tab-separated fields): {line}")
+
                 triplet_text = parts[0].strip()
                 taxa = tuple(part.strip() for part in triplet_text.split(",") if part.strip())
                 if len(taxa) != 3:
                     raise ValueError(f"Invalid triplet header: {line}")
 
-                count = None
-                if len(parts) >= 2 and parts[1].strip():
-                    try:
-                        count = int(parts[1].strip())
-                    except ValueError:
-                        count = None
+                if not parts[1].strip():
+                    raise ValueError(f"Invalid triplet count in header: {line}")
+                try:
+                    count = int(parts[1].strip())
+                except ValueError as exc:
+                    raise ValueError(f"Invalid triplet count in header: {line}") from exc
 
-                species_tree = parts[2].strip() if len(parts) >= 3 and parts[2].strip() else None
+                if not parts[2].strip():
+                    raise ValueError(f"Invalid species tree in header: {line}")
+                species_tree = parts[2].strip()
                 current_triplet = taxa
                 triplet_map[current_triplet] = {
                     "count": count,
@@ -509,11 +562,66 @@ def parse_triplet_gene_trees_file(filepath):
     return triplet_map
 
 
-def analyze_triplet_gene_tree_file(filepath, alpha_dct=0.01, alpha_ks=0.05, rng=None):
+def _get_mp_context():
+    """Get a multiprocessing context that avoids fork in multi-threaded processes."""
+    if hasattr(mp, "get_context"):
+        methods = mp.get_all_start_methods()
+        if "forkserver" in methods:
+            return mp.get_context("forkserver")
+        if "spawn" in methods:
+            return mp.get_context("spawn")
+    return mp
+
+
+def _resolve_processes(processes):
+    """Resolve process count where 0 means all available CPU cores."""
+    if processes == 0:
+        return cpu_count()
+    return processes
+
+
+def _analyze_triplet_entry(args):
+    """Analyze one triplet map entry in a worker process."""
+    triplet, entry, alpha_dct, alpha_ks = args
+    species_topology = _species_topology_from_newick(entry.get("species_tree"), triplet)
+    observations = _serialize_triplet_gene_trees(triplet, entry["gene_trees"])
+    return _run_triplet_pipeline_from_observations(
+        triplet,
+        observations,
+        alpha_dct=alpha_dct,
+        alpha_ks=alpha_ks,
+        species_topology=species_topology,
+        species_tree_newick=entry.get("species_tree"),
+    )
+
+
+def analyze_triplet_gene_tree_file(
+    filepath,
+    alpha_dct=0.01,
+    alpha_ks=0.05,
+    rng=None,
+    use_multiprocessing=True,
+    processes=None,
+):
     """Analyze all triplets from a triplet-gene-trees file."""
     triplet_map = parse_triplet_gene_trees_file(filepath)
+    items = list(triplet_map.items())
+    if not items:
+        return []
+
+    resolved_processes = _resolve_processes(processes)
+    worker_count = resolved_processes or cpu_count()
+    worker_count = max(1, min(worker_count, len(items)))
+
+    if use_multiprocessing and worker_count > 1 and rng is None:
+        args = [(triplet, entry, alpha_dct, alpha_ks) for triplet, entry in items]
+        chunksize = max(1, len(args) // (worker_count * 4))
+        ctx = _get_mp_context()
+        with ctx.Pool(processes=worker_count) as pool:
+            return list(pool.imap(_analyze_triplet_entry, args, chunksize=chunksize))
+
     results = []
-    for triplet, entry in triplet_map.items():
+    for triplet, entry in items:
         species_topology = _species_topology_from_newick(entry.get("species_tree"), triplet)
         results.append(
             run_triplet_pipeline(
@@ -522,6 +630,7 @@ def analyze_triplet_gene_tree_file(filepath, alpha_dct=0.01, alpha_ks=0.05, rng=
                 alpha_dct=alpha_dct,
                 alpha_ks=alpha_ks,
                 species_topology=species_topology,
+                species_tree_newick=entry.get("species_tree"),
                 rng=rng,
             )
         )
@@ -545,22 +654,18 @@ def write_pipeline_results(results, output_filepath):
     header = [
         "triplet",
         "abc_mapping",
-        "species_topology",
+        "species_tree",
         "con_topology",
         "dis1_topology",
         "dis2_topology",
-        "top1_topology",
-        "top2_topology",
-        "top3_topology",
         "highest_freq_topologies",
-        "concordant_diff",
         "n_topology_ab",
         "n_topology_bc",
         "n_topology_ac",
-        "classification",
         "n_con",
         "n_dis1",
         "n_dis2",
+        "most_frequent_matches_concordant",
         "dct_p_value",
         "dct_significant",
         "ks_statistic",
@@ -568,45 +673,28 @@ def write_pipeline_results(results, output_filepath):
         "ks_significant",
         "median_con",
         "median_dis",
-        "skipped_trees",
+        "classification",
+        "analyzed_trees",
     ]
 
     with open(output_filepath, "w") as out_f:
         out_f.write("\t".join(header) + "\n")
         for result in results:
-            con_topology_display = (
-                f"{result.con_topology} [diff]" if result.concordant_diff else result.con_topology
-            )
-            if result.con_topology in result.highest_freq_topologies:
-                con_topology_display += " [highest freq]"
-
-            dis1_topology_display = result.dis1_topology
-            if result.dis1_topology in result.highest_freq_topologies:
-                dis1_topology_display += " [highest freq]"
-
-            dis2_topology_display = result.dis2_topology
-            if result.dis2_topology in result.highest_freq_topologies:
-                dis2_topology_display += " [highest freq]"
-
             row = [
                 ",".join(result.triplet),
                 f"A={result.triplet[0]},B={result.triplet[1]},C={result.triplet[2]}",
-                result.species_topology,
-                con_topology_display,
-                dis1_topology_display,
-                dis2_topology_display,
-                result.top1_topology,
-                result.top2_topology,
-                result.top3_topology,
+                "" if result.species_tree is None else result.species_tree,
+                result.con_topology,
+                result.dis1_topology,
+                result.dis2_topology,
                 ",".join(result.highest_freq_topologies),
-                str(result.concordant_diff),
                 str(result.n_topology_ab),
                 str(result.n_topology_bc),
                 str(result.n_topology_ac),
-                result.classification,
                 str(result.n_con),
                 str(result.n_dis1),
                 str(result.n_dis2),
+                str(result.most_frequent_matches_concordant),
                 f"{result.dct_p_value:.12g}",
                 str(result.dct_significant),
                 "" if result.ks_statistic is None else f"{result.ks_statistic:.12g}",
@@ -614,7 +702,8 @@ def write_pipeline_results(results, output_filepath):
                 "" if result.ks_significant is None else str(result.ks_significant),
                 "" if result.median_con is None else f"{result.median_con:.12g}",
                 "" if result.median_dis is None else f"{result.median_dis:.12g}",
-                str(result.skipped_trees),
+                result.classification,
+                str(result.analyzed_trees),
             ]
             out_f.write("\t".join(row) + "\n")
 
@@ -631,12 +720,30 @@ def main():
     )
     parser.add_argument("--alpha-dct", type=float, default=0.01, help="DCT significance threshold (default: 0.01)")
     parser.add_argument("--alpha-ks", type=float, default=0.05, help="KS significance threshold (default: 0.05)")
+    parser.add_argument(
+        "-p",
+        "--processes",
+        type=int,
+        default=0,
+        help="Number of worker processes for triplet analysis (0 = all cores)",
+    )
+    parser.add_argument(
+        "--no-multiprocessing",
+        action="store_true",
+        help="Disable multiprocessing for triplet analysis",
+    )
     args = parser.parse_args()
 
     input_path = Path(args.input)
     output_path = Path(args.output) if args.output else input_path.parent / "triplet_introgression_results.tsv"
 
-    results = analyze_triplet_gene_tree_file(str(input_path), alpha_dct=args.alpha_dct, alpha_ks=args.alpha_ks)
+    results = analyze_triplet_gene_tree_file(
+        str(input_path),
+        alpha_dct=args.alpha_dct,
+        alpha_ks=args.alpha_ks,
+        use_multiprocessing=not args.no_multiprocessing,
+        processes=args.processes,
+    )
     write_pipeline_results(results, str(output_path))
 
     stats_output = Path(args.stats_output) if args.stats_output else output_path.with_suffix(".json")
