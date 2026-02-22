@@ -4,7 +4,7 @@ This document describes the end-to-end orchestrator in [ghostparser/orchestrator
 
 1. tree preprocessing/triplet extraction (from `tree_parser`)
 2. per-triplet introgression inference (from `triplet_processor`)
-3. final TSV aggregation (`orchestrator_triplet_results.tsv`)
+3. final TSV reporting (`orchestrator_triplet_results.tsv`)
 
 ## CLI Input Options
 
@@ -12,6 +12,12 @@ Run:
 
 ```bash
 python -m ghostparser.orchestrator -st <species_tree> -gt <gene_trees> -og <outgroup>
+```
+
+Or with a config file:
+
+```bash
+python -m ghostparser.orchestrator -c <config.yaml>
 ```
 
 Options:
@@ -22,17 +28,18 @@ Options:
   - Path to gene trees file (Newick, one tree per line).
 - `-og`, `--outgroup` (required)
   - Outgroup taxon name(s). Multiple outgroups are comma-separated.
+- `-c`, `--config-file` (optional)
+  - Path to JSON/YAML config file.
+  - When provided, other CLI options are ignored and a warning is printed.
 - `-tf`, `--triplet-filter` (optional)
   - Path to triplet file (`taxon1,taxon2,taxon3` per line). If omitted, triplets are generated from species-tree ingroup taxa.
 - `-o`, `--output` (optional)
-  - Output folder relative to species-tree directory. Default is species-tree directory.
+  - Output folder path. Default is `./results` (from the current working directory).
 - `-p`, `--processes` (optional)
-  - Worker processes for extraction + inference.
-  - `0` means all available CPU cores (`cpu_count()`).
-- `--no-multiprocessing` (optional flag)
-  - Forces single-worker execution for extraction and inference.
-- `--log-triplet-gene-trees` (optional flag)
-  - Debug mode: appends generated triplets and extracted gene trees to `unique_triplets_gene_trees.txt` while processing.
+  - Worker processes for both triplet extraction (`tree_parser`) and per-triplet inference (`triplet_processor`).
+  - Defaults to `0`, which means all available CPU cores (`cpu_count()`).
+
+`min_support_value` is supported via config file only (optional). If omitted, default tree-parser threshold behavior is used.
 
 ## Pipeline Summary
 
@@ -43,12 +50,13 @@ Options:
    - Converts each triplet to A/B/C orientation where A and B are species sisters (`_build_species_triplet_metadata`).
 3. Gene tree cleaning/rooting
    - Uses `clean_and_save_gene_trees`.
-4. In-memory triplet extraction + per-triplet inference
-  - For each normalized triplet, gene-tree subtrees are extracted in memory from cleaned rooted gene trees.
-  - `run_triplet_pipeline` is called immediately for that triplet (parallelized across triplets).
-  - Optional debug logging writes the same section format as `tree_parser` into `unique_triplets_gene_trees.txt`.
-5. Final reporting
-   - Per-triplet dictionaries are written to TSV with `write_orchestrated_results_tsv`.
+4. Triplet extraction file generation
+  - Uses `write_triplet_gene_trees_multiprocess` from `tree_parser`.
+  - Writes `unique_triplets_gene_trees.txt` in the same section format as `tree_parser`.
+5. Per-triplet inference from file
+  - Uses `analyze_triplet_gene_tree_file` from `triplet_processor` on `unique_triplets_gene_trees.txt`.
+6. Final reporting
+   - Uses `write_pipeline_results` to write `orchestrator_triplet_results.tsv`.
 
 ## Final TSV Columns (How Each Is Produced)
 
@@ -72,51 +80,32 @@ Canonical topology strings:
 - `((B,C),A)`
 - `((A,C),B)`
 
-- `species_topology`
-  - Source: `_species_topology_from_newick` in `triplet_processor`.
-  - Method: classifies the species-triplet subtree header Newick using `classify_triplet_topology_string`.
+- `species_tree`
+  - Source: species-triplet subtree header passed into `run_triplet_pipeline`.
+  - Method: exact extracted species-triplet Newick string for that triplet.
 
 - `con_topology`
   - Source: `run_triplet_pipeline`.
-  - Method: always set equal to `species_topology` (species-anchored concordant definition).
-
-- `con_topology_display`
-  - Source: `TripletPipelineResult.to_dict()`.
-  - Method:
-    - starts as `con_topology`
-    - appends `[diff]` if concordant topology is not among highest-frequency topologies
-    - appends `[highest freq]` if concordant topology is tied/selected as highest frequency.
+  - Method: topology that matches species tree for the triplet.
 
 - `dis1_topology`
   - Source: `run_triplet_pipeline`.
-  - Method: the more frequent of the two discordant topologies (relative to species topology). Tie: random order.
-
-- `dis1_topology_display`
-  - Source: `TripletPipelineResult.to_dict()`.
-  - Method: `dis1_topology` with `[highest freq]` tag when applicable.
+  - Method: more frequent of the two discordant topologies.
 
 - `dis2_topology`
   - Source: `run_triplet_pipeline`.
-  - Method: the other discordant topology after assigning `dis1_topology`.
+  - Method: less frequent of the two discordant topologies.
 
-- `dis2_topology_display`
-  - Source: `TripletPipelineResult.to_dict()`.
-  - Method: `dis2_topology` with `[highest freq]` tag when applicable.
-
-### Frequency Ranking Metadata
-
-- `top1_topology`, `top2_topology`, `top3_topology`
-  - Source: `rank_topologies_by_frequency(topology_counts, rng=...)`.
-  - Method: ranks all three topologies by descending count. Ties are shuffled randomly.
+### Frequency Metadata
 
 - `highest_freq_topologies`
   - Source: `run_triplet_pipeline`.
   - Method: set of topologies whose count equals the global max among the three.
   - TSV representation: comma-joined list.
 
-- `concordant_diff`
+- `most_frequent_matches_concordant`
   - Source: `run_triplet_pipeline`.
-  - Method: boolean `con_topology not in highest_freq_topologies`.
+  - Method: `True` when `n_con >= n_dis1` and `n_con >= n_dis2`; otherwise `False`.
 
 ### Raw Topology Counts
 
@@ -134,13 +123,13 @@ Each gene tree in the triplet section is classified with `classify_triplet_topol
 ### Inference Group Counts
 
 - `n_con`
-  - Method: count for `con_topology` (species-concordant group).
+  - Method: count for species-matching `con_topology`.
 
 - `n_dis1`
-  - Method: count for `dis1_topology` (major discordant group).
+  - Method: count for more frequent discordant topology.
 
 - `n_dis2`
-  - Method: count for `dis2_topology` (minor discordant group).
+  - Method: count for less frequent discordant topology.
 
 ### DCT-like Test Outputs
 
@@ -185,10 +174,12 @@ Per-gene-tree height uses:
       - `ghost_introgression` if `median_con < median_dis`
       - `unresolved` if equal/undefined.
 
-### Data Quality Tracking
+### Data Coverage Tracking
 
-- `skipped_trees`
-  - Method: number of input triplet gene trees skipped in `run_triplet_pipeline` due to taxa mismatch or parse/classification errors.
+- `analyzed_trees`
+  - Method (orchestrator output):
+    - number of extracted triplet gene trees that are actually used in per-triplet inference.
+  - This is the direct denominator behind per-triplet topology counts and statistics.
 
 ## Example TSV Representation
 
@@ -197,35 +188,32 @@ Below is an example of how one row appears in `orchestrator_triplet_results.tsv`
 Header (truncated for readability):
 
 ```tsv
-triplet	abc_mapping	species_topology	con_topology_display	dis1_topology_display	dis2_topology_display	top1_topology	top2_topology	top3_topology	highest_freq_topologies	n_topology_ab	n_topology_bc	n_topology_ac	n_con	n_dis1	n_dis2	dct_p_value	dct_significant	ks_statistic	ks_p_value	ks_significant	classification	skipped_trees
+triplet	abc_mapping	species_tree	con_topology	dis1_topology	dis2_topology	highest_freq_topologies	n_topology_ab	n_topology_bc	n_topology_ac	n_con	n_dis1	n_dis2	most_frequent_matches_concordant	dct_p_value	dct_significant	ks_statistic	ks_p_value	ks_significant	classification	analyzed_trees
 ```
 
 Example data row:
 
 ```tsv
-TaxaA,TaxaB,TaxaC	A=TaxaA,B=TaxaB,C=TaxaC	((A,B),C)	((A,B),C) [diff]	((B,C),A) [highest freq]	((A,C),B)	((B,C),A)	((A,B),C)	((A,C),B)	((B,C),A)	8	12	4	8	12	4	0.001	True	0.2	0.07	False	outflow_introgression	0
+TaxaA,TaxaB,TaxaC	A=TaxaA,B=TaxaB,C=TaxaC	((TaxaA:1,TaxaB:1):1,TaxaC:1);	((A,B),C)	((B,C),A)	((A,C),B)	((B,C),A)	8	12	4	8	12	4	False	0.001	True	0.2	0.07	False	outflow_introgression	24
 ```
 
 How to read this example quickly:
 
 - `abc_mapping` shows exactly which taxa are A/B/C in all topology labels.
-- `con_topology_display` has `[diff]` because species-concordant topology is not highest frequency here.
-- `dis1_topology_display` has `[highest freq]`, showing the dominant topology is discordant.
+- `most_frequent_matches_concordant=False` because a discordant topology frequency is higher than concordant frequency.
 - `classification = outflow_introgression` because DCT is significant, but KS is not significant.
 
 ## Additional Outputs from Orchestrator Run
 
 - `processed_<species_tree_filename>`
 - `processed_<gene_trees_filename>`
-- `metrics.txt`
+- `unique_triplets_gene_trees.txt`
 - `orchestrator_triplet_results.tsv`
-
-Optional (debug flag):
-
-- `unique_triplets_gene_trees.txt` (when `--log-triplet-gene-trees` is enabled)
+- `metrics.txt`
 
 ## Notes on Parallelism
 
-- Triplet extraction and inference are combined in one per-triplet worker path in `analyze_triplets_parallel`.
-- Multiprocessing is applied across triplets via `multiprocessing.Pool`.
+- Multiprocessing is applied during triplet extraction via `write_triplet_gene_trees_multiprocess`.
+- Multiprocessing is also applied during inference via `triplet_processor.analyze_triplet_gene_tree_file`.
 - `-p 0` explicitly resolves to all cores via `cpu_count()`.
+- Use `-p 1` for effective single-worker execution.
