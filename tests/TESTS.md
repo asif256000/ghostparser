@@ -1,6 +1,6 @@
 # Test Suite Documentation
 
-The ghostparser project includes comprehensive test coverage with 42 test cases organized into multiple categories.
+There are comprehensive test coverage with test cases organized into multiple categories.
 
 ## Running Tests
 
@@ -10,22 +10,16 @@ The ghostparser project includes comprehensive test coverage with 42 test cases 
 pytest
 ```
 
-### Run Tests with Verbose Output
-
-```bash
-pytest -v
-```
-
 ### Run Specific Test File
 
 ```bash
-pytest tests/test_tree_parser.py -v
+pytest tests/test_tree_parser.py
 ```
 
 ### Run Specific Test
 
 ```bash
-pytest tests/test_tree_parser.py::test_extract_triplet_subtree_all_taxa_present -v
+pytest tests/test_tree_parser.py::test_extract_triplet_subtree_all_taxa_present
 ```
 
 ### Run Tests with Coverage (requires `pytest-cov`)
