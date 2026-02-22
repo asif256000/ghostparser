@@ -1,9 +1,11 @@
 """Tests for orchestrator module."""
 
+import argparse
+
 from ghostparser.orchestrator import (
+    _resolve_parallel_mode,
+    _resolve_runtime_args,
     _resolve_processes,
-    analyze_triplets_parallel,
-    write_orchestrated_results_tsv,
 )
 
 
@@ -14,96 +16,64 @@ def test_resolve_processes_zero_uses_all_cores(monkeypatch):
     assert _resolve_processes(4) == 4
 
 
-def test_analyze_triplets_parallel_returns_dict_rows_single_worker():
-    triplets = [("A", "B", "C")]
-    species_triplet_trees = {("A", "B", "C"): "((A:1,B:1):1,C:1);"}
-    gene_tree_newicks = [
-        "((A:1,B:1):1,C:1);",
-        "((B:1,C:1):1,A:1);",
-        "((A:1,C:1):1,B:1);",
-    ]
+def test_resolve_parallel_mode(monkeypatch):
+    monkeypatch.setattr("ghostparser.orchestrator.cpu_count", lambda: 8)
 
-    rows, workers, total_subtrees, triplets_with_trees = analyze_triplets_parallel(
-        triplets,
-        species_triplet_trees,
-        gene_tree_newicks,
-        use_multiprocessing=False,
-        processes=1,
+    processes, use_multiprocessing = _resolve_parallel_mode(0)
+    assert processes == 8
+    assert use_multiprocessing is True
+
+    processes, use_multiprocessing = _resolve_parallel_mode(1)
+    assert processes == 1
+    assert use_multiprocessing is False
+
+    processes, use_multiprocessing = _resolve_parallel_mode(4)
+    assert processes == 4
+    assert use_multiprocessing is True
+
+
+def test_resolve_runtime_args_cli_defaults(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    args = argparse.Namespace(
+        config_file=None,
+        species_tree="species.nwk",
+        gene_trees="genes.nwk",
+        outgroup="Out1,Out2",
+        triplet_filter=None,
+        output=str(tmp_path / "results"),
+        processes=0,
     )
 
-    assert workers == 1
-    assert len(rows) == 1
-    assert total_subtrees == 3
-    assert triplets_with_trees == 1
-    row = rows[0]
-    assert row["triplet"] == ("A", "B", "C")
-    assert "classification" in row
-    assert "topology_counts" in row
+    resolved = _resolve_runtime_args(args)
+
+    assert resolved.species_tree == "species.nwk"
+    assert resolved.gene_trees == "genes.nwk"
+    assert resolved.outgroup == "Out1,Out2"
+    assert resolved.output == str(tmp_path / "results")
+    assert resolved.processes == 0
+    assert resolved.min_support_value is None
 
 
-def test_analyze_triplets_parallel_logs_triplet_gene_trees(tmp_path):
-    triplets = [("A", "B", "C")]
-    species_triplet_trees = {("A", "B", "C"): "((A:1,B:1):1,C:1);"}
-    gene_tree_newicks = [
-        "((A:1,B:1):1,C:1);",
-        "((B:1,C:1):1,A:1);",
-    ]
-    log_file = tmp_path / "unique_triplets_gene_trees.txt"
-
-    rows, workers, total_subtrees, triplets_with_trees = analyze_triplets_parallel(
-        triplets,
-        species_triplet_trees,
-        gene_tree_newicks,
-        use_multiprocessing=False,
-        processes=1,
-        log_triplet_gene_trees=True,
-        triplet_log_filepath=str(log_file),
+def test_resolve_runtime_args_config_with_cli_warns_and_ignores(tmp_path, capsys):
+    config_path = tmp_path / "run_config.json"
+    config_path.write_text(
+        '{"species_tree_path":"s.nwk","gene_trees_path":"g.nwk","outgroup":"OutA"}'
     )
 
-    assert workers == 1
-    assert len(rows) == 1
-    assert total_subtrees == 2
-    assert triplets_with_trees == 1
-    content = log_file.read_text()
-    assert "A,B,C\t2\t((A:1,B:1):1,C:1);" in content
+    args = argparse.Namespace(
+        config_file=str(config_path),
+        species_tree="species.nwk",
+        gene_trees=None,
+        outgroup=None,
+        triplet_filter=None,
+        output=str(tmp_path / "results"),
+        processes=0,
+    )
 
+    resolved = _resolve_runtime_args(args)
+    captured = capsys.readouterr()
 
-def test_write_orchestrated_results_tsv(tmp_path):
-    rows = [
-        {
-            "triplet": ("A", "B", "C"),
-            "abc_mapping": "A=A,B=B,C=C",
-            "species_topology": "((A,B),C)",
-            "con_topology": "((A,B),C)",
-            "con_topology_display": "((A,B),C)",
-            "dis1_topology": "((B,C),A)",
-            "dis1_topology_display": "((B,C),A) [highest freq]",
-            "dis2_topology": "((A,C),B)",
-            "dis2_topology_display": "((A,C),B)",
-            "topology_frequency_ranking": ["((B,C),A)", "((A,B),C)", "((A,C),B)"],
-            "highest_freq_topologies": ["((B,C),A)"],
-            "concordant_diff": True,
-            "topology_counts": {"((A,B),C)": 8, "((B,C),A)": 12, "((A,C),B)": 4},
-            "n_con": 8,
-            "n_dis1": 12,
-            "n_dis2": 4,
-            "dct_p_value": 0.02,
-            "dct_significant": False,
-            "ks_statistic": None,
-            "ks_p_value": None,
-            "ks_significant": None,
-            "median_con": None,
-            "median_dis": None,
-            "classification": "no_introgression",
-            "skipped_trees": 0,
-        }
-    ]
-
-    out_file = tmp_path / "orchestrated.tsv"
-    write_orchestrated_results_tsv(rows, str(out_file))
-
-    content = out_file.read_text()
-    assert "triplet\tabc_mapping\tspecies_topology" in content
-    assert "A,B,C" in content
-    assert "A=A,B=B,C=C" in content
-    assert "((B,C),A)" in content
+    assert "Warning: --config-file provided; CLI arguments not in config will be ignored" in captured.out
+    assert resolved.species_tree == "s.nwk"
+    assert resolved.gene_trees == "g.nwk"
+    assert resolved.outgroup == ["OutA"]
