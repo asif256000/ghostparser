@@ -33,6 +33,10 @@ from ghostparser.tree_parser import (
     write_triplets_to_file,
 )
 
+
+def _species_triplet_map(triplets):
+    return {triplet: f"(({triplet[0]}:1,{triplet[1]}:1):1,{triplet[2]}:1);" for triplet in triplets}
+
 # ============================================================================
 # Fixtures
 # ============================================================================
@@ -681,7 +685,11 @@ def test_write_triplet_gene_trees(tmp_path):
     }
 
     output_file = tmp_path / "triplet_gene_trees.txt"
-    write_triplet_gene_trees(triplet_gene_trees, str(output_file))
+    write_triplet_gene_trees(
+        triplet_gene_trees,
+        str(output_file),
+        species_triplet_trees=_species_triplet_map(list(triplet_gene_trees.keys())),
+    )
 
     assert output_file.exists()
 
@@ -689,7 +697,7 @@ def test_write_triplet_gene_trees(tmp_path):
     lines = content.split("\n")
 
     # Check first triplet header
-    assert "TaxaA,TaxaB,TaxaC\t2" in lines[0]
+    assert lines[0] == "TaxaA,TaxaB,TaxaC\t2\t((TaxaA:1,TaxaB:1):1,TaxaC:1);"
 
     # Check blank line after header
     assert lines[1] == ""
@@ -705,7 +713,7 @@ def test_write_triplet_gene_trees(tmp_path):
     assert lines[5] == "=" * 60
 
     # Check second triplet header
-    assert "TaxaD,TaxaE,TaxaF\t1" in lines[6]
+    assert lines[6] == "TaxaD,TaxaE,TaxaF\t1\t((TaxaD:1,TaxaE:1):1,TaxaF:1);"
 
 
 def test_write_triplet_gene_trees_includes_species_tree_header(tmp_path):
@@ -731,7 +739,11 @@ def test_write_triplet_gene_trees_empty_triplet(tmp_path):
     }
 
     output_file = tmp_path / "triplet_gene_trees.txt"
-    write_triplet_gene_trees(triplet_gene_trees, str(output_file))
+    write_triplet_gene_trees(
+        triplet_gene_trees,
+        str(output_file),
+        species_triplet_trees=_species_triplet_map(list(triplet_gene_trees.keys())),
+    )
 
     assert output_file.exists()
 
@@ -739,7 +751,7 @@ def test_write_triplet_gene_trees_empty_triplet(tmp_path):
     lines = content.split("\n")
 
     # Should have header with count 0 and blank line
-    assert "TaxaA,TaxaB,TaxaC\t0" in lines[0]
+    assert lines[0] == "TaxaA,TaxaB,TaxaC\t0\t((TaxaA:1,TaxaB:1):1,TaxaC:1);"
     assert lines[1] == ""
     # No trees after blank line
 
@@ -778,7 +790,11 @@ def test_integration_full_triplet_extraction_workflow(tmp_path):
 
     # Write output
     output_file = tmp_path / "triplet_gene_trees.txt"
-    write_triplet_gene_trees(triplet_gene_trees, str(output_file))
+    write_triplet_gene_trees(
+        triplet_gene_trees,
+        str(output_file),
+        species_triplet_trees=_species_triplet_map(list(triplet_gene_trees.keys())),
+    )
 
     # Verify output
     assert output_file.exists()
@@ -807,6 +823,7 @@ def test_write_triplet_gene_trees_multiprocess_single_worker(tmp_path):
         triplets,
         gene_trees_newick,
         str(output_file),
+        species_triplet_trees=_species_triplet_map(triplets),
         use_multiprocessing=False,  # Disable multiprocessing
     )
 
@@ -840,6 +857,7 @@ def test_write_triplet_gene_trees_multiprocess_with_workers(tmp_path):
         triplets,
         gene_trees_newick,
         str(output_file),
+        species_triplet_trees=_species_triplet_map(triplets),
         use_multiprocessing=True,
         processes=2,
     )
@@ -922,7 +940,11 @@ def test_triplet_gene_trees_separator_format(tmp_path):
     }
 
     output_file = tmp_path / "triplet_gene_trees.txt"
-    write_triplet_gene_trees(triplet_gene_trees, str(output_file))
+    write_triplet_gene_trees(
+        triplet_gene_trees,
+        str(output_file),
+        species_triplet_trees=_species_triplet_map(list(triplet_gene_trees.keys())),
+    )
 
     content = output_file.read_text()
     lines = content.split("\n")
@@ -959,6 +981,7 @@ def test_multiprocessing_triplet_writer_handles_empty_triplets(tmp_path):
         triplets,
         gene_trees_newick,
         str(output_file),
+        species_triplet_trees=_species_triplet_map(triplets),
         use_multiprocessing=False,
     )
 
@@ -1078,7 +1101,10 @@ def test_write_triplet_gene_trees_streaming(tmp_path):
     output_file = tmp_path / "triplet_gene_trees.txt"
 
     total_subtrees, triplets_with_trees = write_triplet_gene_trees_streaming(
-        triplets, str(gene_file), str(output_file)
+        triplets,
+        str(gene_file),
+        str(output_file),
+        species_triplet_trees=_species_triplet_map(triplets),
     )
 
     assert output_file.exists()
@@ -1103,6 +1129,7 @@ def test_write_triplet_gene_trees_multiprocess_triplets_single_worker(tmp_path):
         triplets,
         str(gene_file),
         str(output_file),
+        species_triplet_trees=_species_triplet_map(triplets),
         use_multiprocessing=False,
     )
 
@@ -1124,6 +1151,7 @@ def test_write_triplet_gene_trees_multiprocess_accepts_list(tmp_path):
         triplets,
         gene_trees_newick,
         str(output_file),
+        species_triplet_trees=_species_triplet_map(triplets),
         use_multiprocessing=False,
     )
 
@@ -1142,7 +1170,11 @@ def test_write_triplet_gene_trees_separator(tmp_path):
     }
 
     output_file = tmp_path / "triplet_gene_trees.txt"
-    write_triplet_gene_trees(triplet_gene_trees, str(output_file))
+    write_triplet_gene_trees(
+        triplet_gene_trees,
+        str(output_file),
+        species_triplet_trees=_species_triplet_map(list(triplet_gene_trees.keys())),
+    )
 
     content = output_file.read_text()
     assert "=" * 60 in content
