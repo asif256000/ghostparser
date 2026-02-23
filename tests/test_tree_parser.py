@@ -1,5 +1,6 @@
 """Test cases for the tree_parser module."""
 
+import argparse
 from io import StringIO
 import tempfile
 from pathlib import Path
@@ -26,6 +27,7 @@ from ghostparser.tree_parser import (
     remove_support_values,
     standardize_tree,
     _build_species_triplet_metadata,
+    _resolve_runtime_args,
     write_clean_trees,
     write_triplet_gene_trees,
     write_triplet_gene_trees_multiprocess,
@@ -36,6 +38,63 @@ from ghostparser.tree_parser import (
 
 def _species_triplet_map(triplets):
     return {triplet: f"(({triplet[0]}:1,{triplet[1]}:1):1,{triplet[2]}:1);" for triplet in triplets}
+
+
+def test_resolve_runtime_args_tree_parser_cli_defaults():
+    args = argparse.Namespace(
+        config_file=None,
+        species_tree="species.nwk",
+        gene_trees="genes.nwk",
+        outgroup="Out1,Out2",
+        triplet_filter=None,
+        output=None,
+        processes=0,
+        no_multiprocessing=False,
+    )
+
+    resolved = _resolve_runtime_args(args)
+    assert resolved.species_tree == "species.nwk"
+    assert resolved.gene_trees == "genes.nwk"
+    assert resolved.outgroup == "Out1,Out2"
+    assert resolved.min_support_value == 0.5
+
+
+def test_resolve_runtime_args_tree_parser_config_warns_and_ignores(tmp_path, capsys):
+    config_path = tmp_path / "tree_parser_config.json"
+    config_path.write_text(
+        """
+{
+  "species_tree_path": "s.nwk",
+  "gene_trees_path": "g.nwk",
+  "outgroup": "OutA",
+  "processes": 3,
+  "no_multiprocessing": true,
+  "min_support_value": 0.7
+}
+""".strip()
+    )
+
+    args = argparse.Namespace(
+        config_file=str(config_path),
+        species_tree="species.nwk",
+        gene_trees=None,
+        outgroup=None,
+        triplet_filter=None,
+        output=None,
+        processes=0,
+        no_multiprocessing=False,
+    )
+
+    resolved = _resolve_runtime_args(args)
+    captured = capsys.readouterr()
+
+    assert "Warning: --config-file provided; CLI arguments not in config will be ignored" in captured.out
+    assert resolved.species_tree == "s.nwk"
+    assert resolved.gene_trees == "g.nwk"
+    assert resolved.outgroup == ["OutA"]
+    assert resolved.processes == 3
+    assert resolved.no_multiprocessing is True
+    assert resolved.min_support_value == 0.7
 
 # ============================================================================
 # Fixtures
