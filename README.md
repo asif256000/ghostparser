@@ -42,6 +42,12 @@ poetry run python -m ghostparser.orchestrator -c run_config.yaml
 python -m ghostparser.tree_parser -st species.tree -gt genes.tree -og OutGroup
 ```
 
+Or run `tree_parser` from a config file:
+
+```bash
+python -m ghostparser.tree_parser -c sample_configs/tree_parser_minimal.yaml
+```
+
 ### Arguments
 
 The arguments below are for `tree_parser`:
@@ -152,6 +158,12 @@ python -m ghostparser.triplet_processor \
     --alpha-ks 0.05
 ```
 
+Or run `triplet_processor` from a config file:
+
+```bash
+python -m ghostparser.triplet_processor -c sample_configs/triplet_processor_minimal.yaml
+```
+
 Optional multiprocessing for `triplet_processor`:
 
 ```bash
@@ -165,6 +177,7 @@ python -m ghostparser.triplet_processor \
 - `--discordant-test` supports `chi-square` (default) or `z-test`
 - `--summary-statistic` supports `mean` (default) or `median`
 - `--alpha-dct` and `--alpha-ks` are configurable p-value thresholds (defaults: `0.01` and `0.05`)
+- when `-c/--config-file` is provided, other CLI options are ignored with a warning
 
 Triplet topology convention in `triplet_processor`:
 
