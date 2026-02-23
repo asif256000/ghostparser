@@ -105,6 +105,12 @@ Writes per-triplet results to a TSV file with counts, DCT/KS statistics, selecte
 python -m ghostparser.triplet_processor -i unique_triplets_gene_trees.txt
 ```
 
+Config-file mode:
+
+```bash
+python -m ghostparser.triplet_processor -c sample_configs/triplet_processor_minimal.yaml
+```
+
 Optional arguments:
 
 - `-o/--output`: output TSV path (default: `triplet_introgression_results.tsv` next to input)
@@ -112,6 +118,24 @@ Optional arguments:
 - `--alpha-ks`: KS threshold (default: `0.05`)
 - `-p/--processes`: worker count for triplet inference (`0` = all cores)
 - `--no-multiprocessing`: disable multiprocessing for triplet inference
+
+When `-c/--config-file` is provided, other CLI options are ignored with a warning.
+
+### Tree parser CLI usage
+
+Quick CLI mode (required inputs only):
+
+```bash
+python -m ghostparser.tree_parser -st species.tree -gt genes.tree -og OutGroup
+```
+
+Config-file mode:
+
+```bash
+python -m ghostparser.tree_parser -c sample_configs/tree_parser_minimal.yaml
+```
+
+When `-c/--config-file` is provided, other CLI options are ignored with a warning.
 
 ## Module Functions
 
