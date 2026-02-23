@@ -1,5 +1,6 @@
 """Tests for the triplet_processor module."""
 
+import argparse
 import random
 
 import dendropy
@@ -16,6 +17,7 @@ from ghostparser.triplet_processor import (
     two_proportion_discordant_z_test,
     write_pipeline_statistics_json,
     write_pipeline_results,
+    _resolve_runtime_args,
 )
 from ghostparser.triplet_utils import TOPOLOGY_AB, TOPOLOGY_AC, TOPOLOGY_BC
 from ghostparser.triplet_utils import classify_triplet_topology_string
@@ -376,3 +378,61 @@ def test_write_pipeline_statistics_json(tmp_path):
     out = output_file.read_text()
     assert "topology_counts" in out
     assert "classification" in out
+
+
+def test_resolve_runtime_args_triplet_processor_cli_defaults():
+    args = argparse.Namespace(
+        config_file=None,
+        input="unique_triplets_gene_trees.txt",
+        output=None,
+        stats_output=None,
+        alpha_dct=0.01,
+        alpha_ks=0.05,
+        discordant_test="chi-square",
+        summary_statistic="mean",
+        processes=0,
+        no_multiprocessing=False,
+    )
+
+    resolved = _resolve_runtime_args(args)
+    assert resolved.input == "unique_triplets_gene_trees.txt"
+    assert resolved.alpha_dct == 0.01
+    assert resolved.alpha_ks == 0.05
+    assert resolved.discordant_test == "chi-square"
+    assert resolved.summary_statistic == "mean"
+
+
+def test_resolve_runtime_args_triplet_processor_config_warns_and_ignores(tmp_path, capsys):
+    config_path = tmp_path / "triplet_processor_config.json"
+    config_path.write_text(
+        """
+{
+  "input_path": "input.tsv",
+  "output_path": "out.tsv",
+  "discordant_test": "z-test",
+  "summary_statistic": "median"
+}
+""".strip()
+    )
+
+    args = argparse.Namespace(
+        config_file=str(config_path),
+        input="unique_triplets_gene_trees.txt",
+        output=None,
+        stats_output=None,
+        alpha_dct=0.01,
+        alpha_ks=0.05,
+        discordant_test="chi-square",
+        summary_statistic="mean",
+        processes=0,
+        no_multiprocessing=False,
+    )
+
+    resolved = _resolve_runtime_args(args)
+    captured = capsys.readouterr()
+
+    assert "Warning: --config-file provided; CLI arguments not in config will be ignored" in captured.out
+    assert resolved.input == "input.tsv"
+    assert resolved.output == "out.tsv"
+    assert resolved.discordant_test == "z-test"
+    assert resolved.summary_statistic == "median"
