@@ -11,8 +11,9 @@ from ghostparser.triplet_processor import (
     collect_triplet_statistics,
     compute_tree_height_statistic,
     parse_triplet_gene_trees_file,
+    pearson_discordant_chi_square_test,
     run_triplet_pipeline,
-    two_sided_discordant_z_test,
+    two_proportion_discordant_z_test,
     write_pipeline_statistics_json,
     write_pipeline_results,
 )
@@ -72,9 +73,15 @@ def test_classify_triplet_topology_labels_concordant_and_discordants():
     assert most_frequent_matches_concordant is False
 
 
-def test_two_sided_discordant_z_test_balanced_counts_not_significant():
-    z_score, p_value = two_sided_discordant_z_test(10, 10)
-    assert z_score == pytest.approx(0.0)
+def test_pearson_discordant_chi_square_balanced_counts_not_significant():
+    chi2_stat, p_value = pearson_discordant_chi_square_test(10, 10)
+    assert chi2_stat == pytest.approx(0.0)
+    assert p_value == pytest.approx(1.0)
+
+
+def test_two_proportion_discordant_z_test_balanced_counts_not_significant():
+    z_stat, p_value = two_proportion_discordant_z_test(10, 10)
+    assert z_stat == pytest.approx(0.0)
     assert p_value == pytest.approx(1.0)
 
 
@@ -98,6 +105,40 @@ def test_run_triplet_pipeline_uses_species_concordant_and_frequency_ranked_disco
     assert result.top1_topology == TOPOLOGY_BC
     assert TOPOLOGY_BC in result.highest_freq_topologies
     assert result.most_frequent_matches_concordant is False
+
+
+def test_run_triplet_pipeline_supports_z_test_for_discordant_counts():
+    species_triplet = ("A", "B", "C")
+    trees = (["((B:1,C:1):1,A:1);"] * 12) + (["((A:1,B:1):1,C:1);"] * 8) + (["((A:1,C:1):1,B:1);"] * 4)
+
+    result = run_triplet_pipeline(
+        species_triplet,
+        trees,
+        species_topology=TOPOLOGY_AB,
+        discordant_test="z-test",
+    )
+
+    assert result.dct_significant is True
+    assert result.dct_p_value < 0.01
+
+
+def test_run_triplet_pipeline_supports_median_summary_statistic():
+    species_triplet = ("A", "B", "C")
+    con_tree = "((A:1.0,B:1.0):2.0,C:3.0);"
+    dis1_tree = "((B:0.2,C:0.2):0.3,A:0.5);"
+    dis2_tree = "((A:0.2,C:0.2):0.3,B:0.5);"
+    trees = ([con_tree] * 40) + ([dis1_tree] * 30) + ([dis2_tree] * 5)
+
+    result = run_triplet_pipeline(
+        species_triplet,
+        trees,
+        species_topology=TOPOLOGY_AB,
+        summary_statistic="median",
+    )
+
+    assert result.summary_statistic == "median"
+    assert result.summary_con is not None
+    assert result.summary_dis is not None
 
 
 def test_run_triplet_pipeline_breaks_discordant_ties_by_first_topology():
@@ -132,7 +173,7 @@ def test_run_triplet_pipeline_no_introgression_when_dct_not_significant():
     assert result.ks_p_value is None
 
 
-def test_run_triplet_pipeline_outflow_when_ks_not_significant():
+def test_run_triplet_pipeline_inflow_when_ks_not_significant():
     species_triplet = ("A", "B", "C")
     con_tree = "((A:0.6,B:0.6):0.4,C:1.0);"
     dis1_tree = "((B:0.6,C:0.6):0.4,A:1.0);"
@@ -143,10 +184,10 @@ def test_run_triplet_pipeline_outflow_when_ks_not_significant():
 
     assert result.dct_significant
     assert result.ks_significant is False
-    assert result.classification == "outflow_introgression"
+    assert result.classification == "inflow_introgression"
 
 
-def test_run_triplet_pipeline_inflow_when_con_median_higher():
+def test_run_triplet_pipeline_outflow_when_con_summary_higher():
     species_triplet = ("A", "B", "C")
     con_tree = "((A:1.0,B:1.0):2.0,C:3.0);"
     dis1_tree = "((B:0.2,C:0.2):0.3,A:0.5);"
@@ -155,14 +196,14 @@ def test_run_triplet_pipeline_inflow_when_con_median_higher():
     trees = ([con_tree] * 40) + ([dis1_tree] * 30) + ([dis2_tree] * 5)
     result = run_triplet_pipeline(species_triplet, trees, species_topology=TOPOLOGY_AB, rng=random.Random(3))
 
-    assert result.classification == "inflow_introgression"
+    assert result.classification == "outflow_introgression"
     assert result.ks_significant is True
     assert result.con_topology == TOPOLOGY_AB
     assert result.most_frequent_matches_concordant is True
-    assert result.median_con > result.median_dis
+    assert result.summary_con > result.summary_dis
 
 
-def test_run_triplet_pipeline_ghost_when_dis_median_higher():
+def test_run_triplet_pipeline_ghost_when_dis_summary_higher():
     species_triplet = ("A", "B", "C")
     con_tree = "((A:0.2,B:0.2):0.3,C:0.5);"
     dis1_tree = "((B:1.0,C:1.0):2.0,A:3.0);"
@@ -175,7 +216,7 @@ def test_run_triplet_pipeline_ghost_when_dis_median_higher():
     assert result.ks_significant is True
     assert result.con_topology == TOPOLOGY_AB
     assert result.most_frequent_matches_concordant is True
-    assert result.median_con < result.median_dis
+    assert result.summary_con < result.summary_dis
 
 
 def test_parse_analyze_and_write_pipeline_roundtrip_with_species_header(tmp_path):
@@ -227,6 +268,34 @@ def test_analyze_triplet_gene_tree_file_with_multiprocessing(tmp_path):
 
     assert len(results) == 1
     assert results[0].analyzed_trees == 3
+
+
+def test_analyze_triplet_gene_tree_file_rejects_unknown_discordant_test(tmp_path):
+    content = """A,B,C\t3\t((A:1,B:1):1,C:1);
+
+((A:1,B:1):1,C:1);
+((B:1,C:1):1,A:1);
+((A:1,C:1):1,B:1);
+"""
+    input_file = tmp_path / "unique_triplets_gene_trees.txt"
+    input_file.write_text(content)
+
+    with pytest.raises(ValueError, match="Unsupported discordant test method"):
+        analyze_triplet_gene_tree_file(str(input_file), discordant_test="bad-test")
+
+
+def test_analyze_triplet_gene_tree_file_rejects_unknown_summary_statistic(tmp_path):
+    content = """A,B,C\t3\t((A:1,B:1):1,C:1);
+
+((A:1,B:1):1,C:1);
+((B:1,C:1):1,A:1);
+((A:1,C:1):1,B:1);
+"""
+    input_file = tmp_path / "unique_triplets_gene_trees.txt"
+    input_file.write_text(content)
+
+    with pytest.raises(ValueError, match="Unsupported summary statistic"):
+        analyze_triplet_gene_tree_file(str(input_file), summary_statistic="mode")
 
 
 def test_parse_triplet_gene_trees_file_requires_species_tree_column(tmp_path):
