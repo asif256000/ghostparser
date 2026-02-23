@@ -44,6 +44,10 @@ from .config import ConfigError, load_orchestrator_config
 DEFAULT_OUTPUT_FOLDER = "results"
 DEFAULT_PROCESSES = 0
 DEFAULT_MIN_SUPPORT_VALUE = 0.5
+DEFAULT_DISCORDANT_TEST = "chi-square"
+DEFAULT_SUMMARY_STATISTIC = "mean"
+DEFAULT_ALPHA_DCT = 0.01
+DEFAULT_ALPHA_KS = 0.05
 
 
 def _default_output_path():
@@ -136,6 +140,18 @@ def _resolve_runtime_args(args):
             output=config.get("output") or _default_output_path(),
             processes=config.get("processes", DEFAULT_PROCESSES),
             min_support_value=config.get("min_support_value"),
+            discordant_test=config.get("discordant_test") or DEFAULT_DISCORDANT_TEST,
+            summary_statistic=config.get("summary_statistic") or DEFAULT_SUMMARY_STATISTIC,
+            alpha_dct=(
+                config.get("alpha_dct")
+                if config.get("alpha_dct") is not None
+                else DEFAULT_ALPHA_DCT
+            ),
+            alpha_ks=(
+                config.get("alpha_ks")
+                if config.get("alpha_ks") is not None
+                else DEFAULT_ALPHA_KS
+            ),
         )
 
     if not args.species_tree or not args.gene_trees or not args.outgroup:
@@ -152,6 +168,10 @@ def _resolve_runtime_args(args):
         output=args.output,
         processes=args.processes,
         min_support_value=None,
+        discordant_test=DEFAULT_DISCORDANT_TEST,
+        summary_statistic=DEFAULT_SUMMARY_STATISTIC,
+        alpha_dct=DEFAULT_ALPHA_DCT,
+        alpha_ks=DEFAULT_ALPHA_KS,
     )
 
 
@@ -189,6 +209,10 @@ def main():
         metrics.log(f"Processing gene trees: {args.gene_trees}")
         outgroup_taxa = _parse_outgroup_arg(args.outgroup)
         metrics.log(f"Outgroup: {', '.join(outgroup_taxa)}")
+        metrics.log(f"Discordant count test: {args.discordant_test}")
+        metrics.log(f"Summary statistic after KS: {args.summary_statistic}")
+        metrics.log(f"DCT alpha: {args.alpha_dct}")
+        metrics.log(f"KS alpha: {args.alpha_ks}")
         support_threshold = (
             args.min_support_value
             if args.min_support_value is not None
@@ -325,6 +349,10 @@ def main():
 
             results = analyze_triplet_gene_tree_file(
                 triplet_output_path,
+                alpha_dct=args.alpha_dct,
+                alpha_ks=args.alpha_ks,
+                discordant_test=args.discordant_test,
+                summary_statistic=args.summary_statistic,
                 use_multiprocessing=use_multiprocessing,
                 processes=processes,
             )
