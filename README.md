@@ -146,6 +146,8 @@ Optional thresholds and output path:
 python -m ghostparser.triplet_processor \
     -i unique_triplets_gene_trees.txt \
     -o triplet_introgression_results.tsv \
+    --discordant-test chi-square \
+    --summary-statistic mean \
     --alpha-dct 0.01 \
     --alpha-ks 0.05
 ```
@@ -160,6 +162,9 @@ python -m ghostparser.triplet_processor \
 
 - `-p` defaults to `0`, which uses all available CPU cores
 - `--no-multiprocessing` forces single-worker analysis
+- `--discordant-test` supports `chi-square` (default) or `z-test`
+- `--summary-statistic` supports `mean` (default) or `median`
+- `--alpha-dct` and `--alpha-ks` are configurable p-value thresholds (defaults: `0.01` and `0.05`)
 
 Triplet topology convention in `triplet_processor`:
 
