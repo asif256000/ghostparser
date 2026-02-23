@@ -18,9 +18,9 @@ The `triplet_processor` module consumes `unique_triplets_gene_trees.txt` and app
 
 1. Set concordant topology to species topology, and rank only discordants by observed frequency (`dis1`, `dis2`).
 2. Compute `H(T)` as the average root-to-tip distance.
-3. Run discordant count test (two-sided Z test, alpha `0.01`).
-4. If significant, run two-sample KS tree-height test (alpha `0.05`).
-5. If significant, compare medians to infer inflow vs ghost introgression.
+3. Run discordant count test (configurable: Pearson chi-square or two-proportion z-test, alpha `alpha_dct`, default `0.01`).
+4. If significant, run two-sample KS tree-height test (alpha `alpha_ks`, default `0.05`).
+5. If significant, compare selected summary statistics (mean by default, median optional) to infer outflow vs ghost introgression.
 
 Triplet sections in `unique_triplets_gene_trees.txt` are written as:
 
@@ -53,9 +53,19 @@ Returns:
 
 - `(label, most_frequent_matches_concordant)` where `most_frequent_matches_concordant` is `True` when concordant count is not lower than either discordant count.
 
-### `run_triplet_pipeline(species_triplet, triplet_gene_trees, alpha_dct=0.01, alpha_ks=0.05)`
+### `run_triplet_pipeline(species_triplet, triplet_gene_trees, alpha_dct=0.01, alpha_ks=0.05, discordant_test='chi-square', summary_statistic='mean')`
 
-Runs full sequential GhostParser logic and returns counts, p-values, medians, and final classification.
+Runs full sequential GhostParser logic and returns counts, p-values, selected summary statistics (`summary_con`, `summary_dis` fields), and final classification.
+
+Discordant test options:
+
+- `chi-square` (default): `scipy.stats.chisquare`
+- `z-test`: two-proportion z-test using `scipy.stats.norm`
+
+Summary statistic options after KS test:
+
+- `mean` (default)
+- `median`
 
 Topology convention:
 
@@ -81,13 +91,13 @@ Parses `unique_triplets_gene_trees.txt` into a dictionary:
 
 - triplet -> `{count, species_tree, gene_trees}`
 
-### `analyze_triplet_gene_tree_file(filepath, alpha_dct=0.01, alpha_ks=0.05, rng=None, use_multiprocessing=True, processes=None)`
+### `analyze_triplet_gene_tree_file(filepath, alpha_dct=0.01, alpha_ks=0.05, discordant_test='chi-square', summary_statistic='mean', rng=None, use_multiprocessing=True, processes=None)`
 
-Runs the pipeline for all triplets in an input file.
+Runs the pipeline for all triplets in an input file with configurable discordant test and summary statistic.
 
 ### `write_pipeline_results(results, output_filepath)`
 
-Writes per-triplet results to a TSV file with counts, DCT and KS statistics, medians, and classification.
+Writes per-triplet results to a TSV file with counts, DCT/KS statistics, selected summary statistic name, summary values (`summary_con`, `summary_dis`), and classification.
 
 ### CLI usage
 
