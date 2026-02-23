@@ -11,10 +11,15 @@ from Bio import Phylo
 from Bio.Phylo.BaseTree import Clade, Tree
 import dendropy
 
+from .config import ConfigError, load_tree_parser_config
 from .triplet_utils import (
     find_sister_pair,
     normalize_abc_from_sister_pair,
 )
+
+
+DEFAULT_PROCESSES = 0
+DEFAULT_MIN_SUPPORT_VALUE = 0.5
 
 
 def read_tree_file(filepath):
@@ -837,41 +842,14 @@ class MetricsLogger:
 
 def main():
     """Main entry point for the tree parser module."""
-    parser = argparse.ArgumentParser(
-        description="Ghost parser for identifying ghost introgressions in phylogenetic trees."
-    )
+    parser = _build_argument_parser()
+    parsed_args = parser.parse_args()
 
-    parser.add_argument("-st", "--species_tree", required=True, help="Path to the species tree file in Newick format")
-    parser.add_argument("-gt", "--gene_trees", required=True, help="Path to the gene trees file in Newick format")
-    parser.add_argument("-og", "--outgroup", required=True, help="Outgroup species identifier")
-    parser.add_argument(
-        "-tf",
-        "--triplet-filter",
-        type=str,
-        default=None,
-        help="Path to triplet filter file (comma-separated taxa per line)",
-    )
-    parser.add_argument(
-        "-o",
-        "--output",
-        type=str,
-        default=None,
-        help="Output folder relative to input data folder (default: same folder as input data)",
-    )
-    parser.add_argument(
-        "-p",
-        "--processes",
-        type=int,
-        default=0,
-        help="Number of worker processes for triplet extraction (default: 0 = all cores)",
-    )
-    parser.add_argument(
-        "--no-multiprocessing",
-        action="store_true",
-        help="Disable multiprocessing for triplet extraction",
-    )
-
-    args = parser.parse_args()
+    try:
+        args = _resolve_runtime_args(parsed_args)
+    except (ValueError, ConfigError) as exc:
+        print(f"Error: {exc}")
+        return
 
     species_tree_path = Path(args.species_tree)
     gene_trees_path = Path(args.gene_trees)
@@ -898,17 +876,28 @@ def main():
         metrics.log(f"Processing species tree: {args.species_tree}")
         metrics.log(f"Processing gene trees: {args.gene_trees}")
         outgroup_taxa = _parse_outgroup_arg(args.outgroup)
+        support_threshold = (
+            args.min_support_value
+            if args.min_support_value is not None
+            else DEFAULT_MIN_SUPPORT_VALUE
+        )
         metrics.log(f"Outgroup: {', '.join(outgroup_taxa)}")
-        metrics.log("Support threshold: 0.5")
+        metrics.log(f"Support threshold: {support_threshold}")
         metrics.log("")
 
         try:
             species_start = time.time()
-            species_trees, dropped_species = clean_and_save_trees(str(species_tree_path), species_tree_clean)
+            species_trees, dropped_species = clean_and_save_trees(
+                str(species_tree_path),
+                species_tree_clean,
+                min_avg_support=support_threshold,
+            )
             metrics.log(f"✓ Species tree cleaned and saved to: {species_tree_clean}")
             metrics.log(f"  Processed {len(species_trees)} tree(s)")
             if dropped_species:
-                metrics.log(f"  ⚠ Dropped {len(dropped_species)} tree(s) with avg support < 0.5:")
+                metrics.log(
+                    f"  ⚠ Dropped {len(dropped_species)} tree(s) with avg support < {support_threshold}:"
+                )
                 for idx, avg_support in dropped_species.items():
                     metrics.log(f"    - Index {idx} from {args.species_tree} (avg support: {avg_support:.4f})")
 
@@ -1010,6 +999,7 @@ def main():
                 str(gene_trees_path),
                 gene_trees_clean,
                 outgroup_taxa,
+                min_avg_support=support_threshold,
             )
             metrics.log(f"\n✓ Gene trees cleaned and saved to: {gene_trees_clean}")
             metrics.log(f"  Processed {len(gene_trees)} tree(s)")
@@ -1023,7 +1013,9 @@ def main():
                     + ", ".join(str(idx) for idx in missing_root_indices)
                 )
             if dropped_genes:
-                metrics.log(f"  ⚠ Dropped {len(dropped_genes)} tree(s) with avg support < 0.5:")
+                metrics.log(
+                    f"  ⚠ Dropped {len(dropped_genes)} tree(s) with avg support < {support_threshold}:"
+                )
                 for idx, avg_support in dropped_genes.items():
                     metrics.log(f"    - Index {idx} from {args.gene_trees} (avg support: {avg_support:.4f})")
 
@@ -1068,6 +1060,105 @@ def main():
 
         metrics.log("\nProcessing complete!")
         metrics.log(f"\nMetrics saved to: {metrics_filepath}")
+
+
+def _build_argument_parser():
+    """Build tree_parser CLI argument parser."""
+    parser = argparse.ArgumentParser(
+        description="Ghost parser for identifying ghost introgressions in phylogenetic trees."
+    )
+
+    parser.add_argument("-c", "--config-file", type=str, default=None, help="Path to a JSON or YAML config file")
+    parser.add_argument("-st", "--species_tree", default=None, help="Path to the species tree file in Newick format")
+    parser.add_argument("-gt", "--gene_trees", default=None, help="Path to the gene trees file in Newick format")
+    parser.add_argument("-og", "--outgroup", default=None, help="Outgroup species identifier")
+    parser.add_argument(
+        "-tf",
+        "--triplet-filter",
+        type=str,
+        default=None,
+        help="Path to triplet filter file (comma-separated taxa per line)",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=str,
+        default=None,
+        help="Output folder relative to input data folder (default: same folder as input data)",
+    )
+    parser.add_argument(
+        "-p",
+        "--processes",
+        type=int,
+        default=DEFAULT_PROCESSES,
+        help="Number of worker processes for triplet extraction (default: 0 = all cores)",
+    )
+    parser.add_argument(
+        "--no-multiprocessing",
+        action="store_true",
+        help="Disable multiprocessing for triplet extraction",
+    )
+    return parser
+
+
+def _cli_args_used_alongside_config(args):
+    """Return names of non-config CLI args provided together with --config-file."""
+    provided = []
+    if args.species_tree is not None:
+        provided.append("--species_tree")
+    if args.gene_trees is not None:
+        provided.append("--gene_trees")
+    if args.outgroup is not None:
+        provided.append("--outgroup")
+    if args.triplet_filter is not None:
+        provided.append("--triplet-filter")
+    if args.output is not None:
+        provided.append("--output")
+    if args.processes != DEFAULT_PROCESSES:
+        provided.append("--processes")
+    if args.no_multiprocessing:
+        provided.append("--no-multiprocessing")
+    return provided
+
+
+def _resolve_runtime_args(args):
+    """Resolve runtime arguments from config-file mode or plain CLI mode."""
+    if args.config_file:
+        ignored_cli_args = _cli_args_used_alongside_config(args)
+        if ignored_cli_args:
+            print(
+                "Warning: --config-file provided; CLI arguments not in config will be ignored: "
+                + ", ".join(ignored_cli_args)
+            )
+
+        config = load_tree_parser_config(args.config_file)
+        return argparse.Namespace(
+            species_tree=config["species_tree"],
+            gene_trees=config["gene_trees"],
+            outgroup=config["outgroup"],
+            triplet_filter=config.get("triplet_filter"),
+            output=config.get("output"),
+            processes=config.get("processes", DEFAULT_PROCESSES),
+            no_multiprocessing=bool(config.get("no_multiprocessing", False)),
+            min_support_value=config.get("min_support_value"),
+        )
+
+    if not args.species_tree or not args.gene_trees or not args.outgroup:
+        raise ValueError(
+            "Missing required CLI arguments. Provide --species_tree, --gene_trees, and --outgroup, "
+            "or use --config-file."
+        )
+
+    return argparse.Namespace(
+        species_tree=args.species_tree,
+        gene_trees=args.gene_trees,
+        outgroup=args.outgroup,
+        triplet_filter=args.triplet_filter,
+        output=args.output,
+        processes=args.processes,
+        no_multiprocessing=args.no_multiprocessing,
+        min_support_value=DEFAULT_MIN_SUPPORT_VALUE,
+    )
 
 
 if __name__ == "__main__":
