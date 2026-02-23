@@ -29,6 +29,7 @@ from pathlib import Path
 import dendropy
 from scipy import stats
 
+from .config import ConfigError, load_triplet_processor_config
 from .triplet_utils import (
     ALL_TOPOLOGIES,
     TOPOLOGY_AB,
@@ -724,8 +725,42 @@ def write_pipeline_results(results, output_filepath):
 
 def main():
     """CLI entry point for triplet processing pipeline."""
+    parser = _build_argument_parser()
+    parsed_args = parser.parse_args()
+
+    try:
+        args = _resolve_runtime_args(parsed_args)
+    except (ValueError, ConfigError) as exc:
+        print(f"Error: {exc}")
+        return
+
+    input_path = Path(args.input)
+    output_path = Path(args.output) if args.output else input_path.parent / "triplet_introgression_results.tsv"
+
+    results = analyze_triplet_gene_tree_file(
+        str(input_path),
+        alpha_dct=args.alpha_dct,
+        alpha_ks=args.alpha_ks,
+        discordant_test=args.discordant_test,
+        summary_statistic=args.summary_statistic,
+        use_multiprocessing=not args.no_multiprocessing,
+        processes=args.processes,
+    )
+    write_pipeline_results(results, str(output_path))
+
+    stats_output = Path(args.stats_output) if args.stats_output else output_path.with_suffix(".json")
+    write_pipeline_statistics_json(results, str(stats_output))
+
+    print(f"Processed {len(results)} triplets")
+    print(f"Results written to: {output_path}")
+    print(f"Statistics JSON written to: {stats_output}")
+
+
+def _build_argument_parser():
+    """Build triplet_processor CLI argument parser."""
     parser = argparse.ArgumentParser(description="Run GhostParser triplet processing pipeline (Fig. 6).")
-    parser.add_argument("-i", "--input", required=True, help="Path to unique_triplets_gene_trees.txt")
+    parser.add_argument("-c", "--config-file", default=None, help="Path to a JSON or YAML config file")
+    parser.add_argument("-i", "--input", default=None, help="Path to unique_triplets_gene_trees.txt")
     parser.add_argument("-o", "--output", default=None, help="Output TSV path (default: alongside input)")
     parser.add_argument(
         "--stats-output",
@@ -758,28 +793,70 @@ def main():
         action="store_true",
         help="Disable multiprocessing for triplet analysis",
     )
-    args = parser.parse_args()
+    return parser
 
-    input_path = Path(args.input)
-    output_path = Path(args.output) if args.output else input_path.parent / "triplet_introgression_results.tsv"
 
-    results = analyze_triplet_gene_tree_file(
-        str(input_path),
+def _cli_args_used_alongside_config(args):
+    """Return names of non-config CLI args provided together with --config-file."""
+    provided = []
+    if args.input is not None:
+        provided.append("--input")
+    if args.output is not None:
+        provided.append("--output")
+    if args.stats_output is not None:
+        provided.append("--stats-output")
+    if args.alpha_dct != 0.01:
+        provided.append("--alpha-dct")
+    if args.alpha_ks != 0.05:
+        provided.append("--alpha-ks")
+    if args.discordant_test != "chi-square":
+        provided.append("--discordant-test")
+    if args.summary_statistic != "mean":
+        provided.append("--summary-statistic")
+    if args.processes != 0:
+        provided.append("--processes")
+    if args.no_multiprocessing:
+        provided.append("--no-multiprocessing")
+    return provided
+
+
+def _resolve_runtime_args(args):
+    """Resolve runtime arguments from config-file mode or plain CLI mode."""
+    if args.config_file:
+        ignored_cli_args = _cli_args_used_alongside_config(args)
+        if ignored_cli_args:
+            print(
+                "Warning: --config-file provided; CLI arguments not in config will be ignored: "
+                + ", ".join(ignored_cli_args)
+            )
+
+        config = load_triplet_processor_config(args.config_file)
+        return argparse.Namespace(
+            input=config["input"],
+            output=config.get("output"),
+            stats_output=config.get("stats_output"),
+            alpha_dct=0.01 if config.get("alpha_dct") is None else config.get("alpha_dct"),
+            alpha_ks=0.05 if config.get("alpha_ks") is None else config.get("alpha_ks"),
+            discordant_test=config.get("discordant_test") or "chi-square",
+            summary_statistic=config.get("summary_statistic") or "mean",
+            processes=config.get("processes", 0),
+            no_multiprocessing=bool(config.get("no_multiprocessing", False)),
+        )
+
+    if not args.input:
+        raise ValueError("Missing required CLI argument --input, or use --config-file.")
+
+    return argparse.Namespace(
+        input=args.input,
+        output=args.output,
+        stats_output=args.stats_output,
         alpha_dct=args.alpha_dct,
         alpha_ks=args.alpha_ks,
         discordant_test=args.discordant_test,
         summary_statistic=args.summary_statistic,
-        use_multiprocessing=not args.no_multiprocessing,
         processes=args.processes,
+        no_multiprocessing=args.no_multiprocessing,
     )
-    write_pipeline_results(results, str(output_path))
-
-    stats_output = Path(args.stats_output) if args.stats_output else output_path.with_suffix(".json")
-    write_pipeline_statistics_json(results, str(stats_output))
-
-    print(f"Processed {len(results)} triplets")
-    print(f"Results written to: {output_path}")
-    print(f"Statistics JSON written to: {stats_output}")
 
 
 if __name__ == "__main__":
