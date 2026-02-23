@@ -995,7 +995,7 @@ def test_multiprocessing_triplet_writer_handles_empty_triplets(tmp_path):
 
 
 # ============================================================================
-# Triplet Utilities (formerly test_triplet_parser)
+# Triplet Utilities
 # ============================================================================
 
 
@@ -1207,7 +1207,7 @@ def test_format_newick_with_precision_triplet_parser():
 
 
 # ============================================================================
-# Triplet Equivalence (formerly test_triplet_equivalence)
+# Triplet Equivalence
 # ============================================================================
 
 
