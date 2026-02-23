@@ -57,6 +57,18 @@ If both `-c/--config-file` and other CLI args are provided, config mode is used 
 - `min_support_value` (number)
   - Support filtering threshold for species and gene tree cleaning.
   - Default behavior when omitted is equivalent to `0.5`.
+- `discordant_test` (string)
+  - Discordant count test method used by `triplet_processor` stage.
+  - Allowed values: `chi-square` (default), `z-test`.
+- `summary_statistic` (string)
+  - Statistic used for con/dis1 distributions after KS test.
+  - Allowed values: `mean` (default), `median`.
+- `alpha_dct` (number)
+  - P-value threshold for the discordant count test.
+  - Default: `0.01`.
+- `alpha_ks` (number)
+  - P-value threshold for KS tree-height test.
+  - Default: `0.05`.
 
 ---
 
