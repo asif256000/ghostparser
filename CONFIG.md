@@ -1,16 +1,20 @@
 # Configuration Guide
 
-This document describes configuration file support for `ghostparser.orchestrator`.
+This document describes configuration file support for:
+
+- `ghostparser.orchestrator`
+- `ghostparser.tree_parser`
+- `ghostparser.triplet_processor`
 
 ## CLI Usage
 
-Run with a config file:
+Run orchestrator with a config file:
 
 ```bash
 python -m ghostparser.orchestrator -c sample_configs/orchestrator_minimal.yaml
 ```
 
-Run with plain CLI arguments:
+Run orchestrator with plain CLI arguments:
 
 ```bash
 python -m ghostparser.orchestrator \
@@ -20,6 +24,18 @@ python -m ghostparser.orchestrator \
 ```
 
 If both `-c/--config-file` and other CLI args are provided, config mode is used and the other CLI args are ignored with a warning.
+
+`tree_parser` config-file mode:
+
+```bash
+python -m ghostparser.tree_parser -c sample_configs/tree_parser_minimal.yaml
+```
+
+`triplet_processor` config-file mode:
+
+```bash
+python -m ghostparser.triplet_processor -c sample_configs/triplet_processor_minimal.yaml
+```
 
 ---
 
@@ -31,7 +47,7 @@ If both `-c/--config-file` and other CLI args are provided, config mode is used 
 
 ---
 
-## Config Keys
+## Orchestrator Config Keys
 
 ### Required
 
@@ -39,9 +55,13 @@ If both `-c/--config-file` and other CLI args are provided, config mode is used 
   - Path to species tree file.
 - `gene_trees_path` (string)
   - Path to gene trees file.
-- `outgroup` or `outgroups`
-  - `outgroup`: comma-separated string (example: `"Taxon1,Taxon2"`)
-  - `outgroups`: list of strings (example: `["Taxon1", "Taxon2"]`)
+- `outgroups` (list of strings)
+  - Example:
+    ```yaml
+    outgroups:
+      - Taxon1
+      - Taxon2
+    ```
 
 ### Optional
 
@@ -79,6 +99,76 @@ See examples in:
 - `sample_configs/orchestrator_minimal.yaml`
 - `sample_configs/orchestrator_full.yaml`
 - `sample_configs/orchestrator_full.json`
+
+---
+
+## Tree Parser Config Keys
+
+### Required
+
+- `species_tree_path` (string)
+- `gene_trees_path` (string)
+- `outgroups` (list of strings)
+  - Example:
+    ```yaml
+    outgroups:
+      - Taxon1
+      - Taxon2
+    ```
+
+### Optional
+
+- `output_folder` (string)
+  - Output folder relative to the input species-tree folder.
+- `processes` (integer >= 0)
+  - Worker count for triplet extraction (`0` = all cores).
+- `triplet_filter` (string)
+  - Path to optional triplet filter file.
+- `min_support_value` (number)
+  - Support filtering threshold for species and gene tree cleaning.
+  - Default: `0.5`.
+- `no_multiprocessing` (boolean)
+  - `true` forces single-worker extraction.
+
+### Tree Parser Sample Configs
+
+- `sample_configs/tree_parser_minimal.yaml`
+- `sample_configs/tree_parser_full.yaml`
+
+---
+
+## Triplet Processor Config Keys
+
+### Required
+
+- `input_path` (string)
+  - Path to `unique_triplets_gene_trees.txt`.
+
+### Optional
+
+- `output_path` (string)
+  - Output TSV path.
+  - Default: `<input_dir>/triplet_introgression_results.tsv`.
+- `stats_output` (string)
+  - Optional JSON statistics output path.
+  - Default: same path as output TSV with `.json` extension.
+- `alpha_dct` (number)
+  - Default: `0.01`.
+- `alpha_ks` (number)
+  - Default: `0.05`.
+- `discordant_test` (string)
+  - Allowed values: `chi-square` (default), `z-test`.
+- `summary_statistic` (string)
+  - Allowed values: `mean` (default), `median`.
+- `processes` (integer >= 0)
+  - Worker count for triplet inference (`0` = all cores).
+- `no_multiprocessing` (boolean)
+  - `true` forces single-worker analysis.
+
+### Triplet Processor Sample Configs
+
+- `sample_configs/triplet_processor_minimal.yaml`
+- `sample_configs/triplet_processor_full.yaml`
 
 ---
 
