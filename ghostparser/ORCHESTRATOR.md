@@ -134,9 +134,9 @@ Each gene tree in the triplet section is classified with `classify_triplet_topol
 ### DCT-like Test Outputs
 
 - `dct_p_value`
-  - Method: two-sided Z-test on discordant counts (`n_dis1`, `n_dis2`):
-    - $z = (n_{dis1} - n_{dis2}) / \sqrt{n_{dis1}+n_{dis2}}$
-    - $p = \mathrm{erfc}(|z|/\sqrt{2})$
+  - Method: configurable discordant test on (`n_dis1`, `n_dis2`):
+    - `chi-square` (default): `scipy.stats.chisquare`
+    - `z-test`: two-proportion z-test
 
 - `dct_significant`
   - Method: `dct_p_value <= alpha_dct` (`alpha_dct` default `0.01`).
@@ -152,26 +152,30 @@ Per-gene-tree height uses:
   - Method: two-sample KS statistic between height samples of `dis1_topology` vs `con_topology`.
 
 - `ks_p_value`
-  - Method: asymptotic KS p-value approximation from `_ks_asymptotic_p_value`.
+  - Method: p-value from `scipy.stats.ks_2samp` (two-sided).
 
 - `ks_significant`
   - Method: `ks_p_value <= alpha_ks` (`alpha_ks` default `0.05`).
 
-### Height Medians and Final Classification
+### Height Summary Values and Final Classification
 
-- `median_con`
-  - Method: median of heights for `con_topology`; only populated if KS is significant.
+- `summary_statistic`
+  - Method: records which summary function is used for height comparison (`mean` by default, or `median` when configured).
+  - This controls the values written to `summary_con` and `summary_dis`.
 
-- `median_dis`
-  - Method: median of heights for `dis1_topology`; only populated if KS is significant.
+- `summary_con`
+  - Method: summary value for `con_topology` heights using `summary_statistic`; only populated if KS is significant.
+
+- `summary_dis`
+  - Method: summary value for `dis1_topology` heights using `summary_statistic`; only populated if KS is significant.
 
 - `classification`
   - Decision path:
     - `no_introgression` if DCT is not significant
-    - `outflow_introgression` if DCT significant but KS not significant
+    - `inflow_introgression` if DCT significant but KS not significant
     - if KS significant:
-      - `inflow_introgression` if `median_con > median_dis`
-      - `ghost_introgression` if `median_con < median_dis`
+      - `outflow_introgression` if `summary_con > summary_dis`
+      - `ghost_introgression` if `summary_con < summary_dis`
       - `unresolved` if equal/undefined.
 
 ### Data Coverage Tracking
@@ -194,14 +198,14 @@ triplet	abc_mapping	species_tree	con_topology	dis1_topology	dis2_topology	highes
 Example data row:
 
 ```tsv
-TaxaA,TaxaB,TaxaC	A=TaxaA,B=TaxaB,C=TaxaC	((TaxaA:1,TaxaB:1):1,TaxaC:1);	((A,B),C)	((B,C),A)	((A,C),B)	((B,C),A)	8	12	4	8	12	4	False	0.001	True	0.2	0.07	False	outflow_introgression	24
+TaxaA,TaxaB,TaxaC	A=TaxaA,B=TaxaB,C=TaxaC	((TaxaA:1,TaxaB:1):1,TaxaC:1);	((A,B),C)	((B,C),A)	((A,C),B)	((B,C),A)	8	12	4	8	12	4	False	0.001	True	0.2	0.07	False	inflow_introgression	24
 ```
 
 How to read this example quickly:
 
 - `abc_mapping` shows exactly which taxa are A/B/C in all topology labels.
 - `most_frequent_matches_concordant=False` because a discordant topology frequency is higher than concordant frequency.
-- `classification = outflow_introgression` because DCT is significant, but KS is not significant.
+- `classification = inflow_introgression` because DCT is significant, but KS is not significant.
 
 ## Additional Outputs from Orchestrator Run
 
