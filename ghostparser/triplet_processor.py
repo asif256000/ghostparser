@@ -5,13 +5,16 @@ GhostParser Figure 6 for rooted species triplets:
 
 1. Classify each triplet gene tree as concordant/dis1/dis2.
 2. Compute tree height statistic ``H(T)`` as average root-to-tip distance.
-3. Run discordant count test (two-sided Z test, alpha=0.01).
+3. Run discordant count test (Pearson chi-square test, alpha=0.01).
 4. If significant, run tree height test (two-sample KS, alpha=0.05).
-5. If significant, compare medians to classify inflow vs ghost introgression.
+5. If significant, compare selected summary values to classify inflow vs ghost introgression.
 
 Concordant topology is defined as the species-tree topology for the ABC triplet.
 The two discordant topologies are frequency-ranked as ``dis1`` (more frequent)
 and ``dis2`` (less frequent), with deterministic first-discordant tie-breaking.
+
+The discordant count test is configurable: Pearson chi-square (default) or
+two-proportion z-test.
 """
 
 from __future__ import annotations
@@ -19,12 +22,12 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 import json
-import math
 import multiprocessing as mp
 from multiprocessing import cpu_count
 from pathlib import Path
 
 import dendropy
+from scipy import stats
 
 from .triplet_utils import (
     ALL_TOPOLOGIES,
@@ -38,6 +41,8 @@ from .triplet_utils import (
 
 Classification = str
 SerializedTripletObservation = tuple[str, float]
+DISCORDANT_TEST_CHOICES = ("chi-square", "z-test")
+SUMMARY_STATISTIC_CHOICES = ("mean", "median")
 
 
 @dataclass(frozen=True)
@@ -66,8 +71,9 @@ class TripletPipelineResult:
     ks_p_value: float | None
     ks_statistic: float | None
     ks_significant: bool | None
-    median_con: float | None
-    median_dis: float | None
+    summary_statistic: str
+    summary_con: float | None
+    summary_dis: float | None
     classification: Classification
     analyzed_trees: int = 0
 
@@ -99,8 +105,9 @@ class TripletPipelineResult:
             "ks_statistic": self.ks_statistic,
             "ks_p_value": self.ks_p_value,
             "ks_significant": self.ks_significant,
-            "median_con": self.median_con,
-            "median_dis": self.median_dis,
+            "summary_statistic": self.summary_statistic,
+            "summary_con": self.summary_con,
+            "summary_dis": self.summary_dis,
             "classification": self.classification,
             "analyzed_trees": self.analyzed_trees,
         }
@@ -186,98 +193,54 @@ def _resolve_topology_roles(topology_counts, species_topology):
     return con_topology, dis1_topology, dis2_topology, most_frequent_matches_concordant
 
 
-def two_sided_discordant_z_test(n_dis1, n_dis2):
-    """Two-sided Z test for discordant topology count imbalance."""
+def pearson_discordant_chi_square_test(n_dis1, n_dis2):
+    """Pearson chi-square test for discordant topology count imbalance."""
     total = n_dis1 + n_dis2
     if total == 0:
         return 0.0, 1.0
 
-    z_score = (n_dis1 - n_dis2) / math.sqrt(total)
-    p_value = math.erfc(abs(z_score) / math.sqrt(2.0))
-    return z_score, min(max(p_value, 0.0), 1.0)
+    result = stats.chisquare([n_dis1, n_dis2])
+    return float(result.statistic), float(result.pvalue)
 
 
-def _ks_statistic(sample_a, sample_b):
-    """Compute two-sample KS D statistic."""
-    if not sample_a or not sample_b:
-        return 0.0
+def two_proportion_discordant_z_test(n_dis1, n_dis2):
+    """Two-proportion z-test for discordant count imbalance.
 
-    x = sorted(float(v) for v in sample_a)
-    y = sorted(float(v) for v in sample_b)
-    n_x = len(x)
-    n_y = len(y)
+    Uses pooled standard error with two proportions defined over the same
+    discordant-total denominator for ``dis1`` and ``dis2``.
+    """
+    total = n_dis1 + n_dis2
+    if total == 0:
+        return 0.0, 1.0
 
-    i = 0
-    j = 0
-    cdf_x = 0.0
-    cdf_y = 0.0
-    d_stat = 0.0
+    p_dis1 = n_dis1 / total
+    p_dis2 = n_dis2 / total
+    pooled = (n_dis1 + n_dis2) / (2 * total)
+    standard_error = (pooled * (1.0 - pooled) * ((1.0 / total) + (1.0 / total))) ** 0.5
+    if standard_error == 0.0:
+        return 0.0, 1.0
 
-    while i < n_x and j < n_y:
-        if x[i] < y[j]:
-            value = x[i]
-            while i < n_x and x[i] == value:
-                i += 1
-            cdf_x = i / n_x
-        elif y[j] < x[i]:
-            value = y[j]
-            while j < n_y and y[j] == value:
-                j += 1
-            cdf_y = j / n_y
-        else:
-            value = x[i]
-            while i < n_x and x[i] == value:
-                i += 1
-            while j < n_y and y[j] == value:
-                j += 1
-            cdf_x = i / n_x
-            cdf_y = j / n_y
-
-        d_stat = max(d_stat, abs(cdf_x - cdf_y))
-
-    while i < n_x:
-        value = x[i]
-        while i < n_x and x[i] == value:
-            i += 1
-        cdf_x = i / n_x
-        d_stat = max(d_stat, abs(cdf_x - cdf_y))
-
-    while j < n_y:
-        value = y[j]
-        while j < n_y and y[j] == value:
-            j += 1
-        cdf_y = j / n_y
-        d_stat = max(d_stat, abs(cdf_x - cdf_y))
-
-    return d_stat
+    z_score = (p_dis1 - p_dis2) / standard_error
+    p_value = 2.0 * stats.norm.sf(abs(z_score))
+    return float(z_score), float(p_value)
 
 
-def _ks_asymptotic_p_value(d_stat, n_x, n_y, terms=200):
-    """Asymptotic p-value approximation for two-sample KS test."""
-    if n_x == 0 or n_y == 0:
-        return 1.0
-    if d_stat <= 0.0:
-        return 1.0
-
-    en = math.sqrt((n_x * n_y) / (n_x + n_y))
-    lam = (en + 0.12 + 0.11 / en) * d_stat
-
-    summation = 0.0
-    for idx in range(1, terms + 1):
-        term = math.exp(-2.0 * (idx**2) * (lam**2))
-        summation += term if idx % 2 == 1 else -term
-        if term < 1e-12:
-            break
-
-    p_value = 2.0 * summation
-    return min(max(p_value, 0.0), 1.0)
+def run_discordant_count_test(n_dis1, n_dis2, method="chi-square"):
+    """Run selected discordant count test and return (statistic, p-value)."""
+    if method == "chi-square":
+        return pearson_discordant_chi_square_test(n_dis1, n_dis2)
+    if method == "z-test":
+        return two_proportion_discordant_z_test(n_dis1, n_dis2)
+    raise ValueError(f"Unsupported discordant test method: {method}")
 
 
 def two_sample_ks_test(sample_a, sample_b):
     """Two-sample KS test returning (D, p-value)."""
-    d_stat = _ks_statistic(sample_a, sample_b)
-    p_value = _ks_asymptotic_p_value(d_stat, len(sample_a), len(sample_b))
-    return d_stat, p_value
+    if not sample_a or not sample_b:
+        return 0.0, 1.0
+
+    result = stats.ks_2samp(sample_a, sample_b, alternative="two-sided", method="auto")
+    return float(result.statistic), float(result.pvalue)
 
 
 def _median(values):
@@ -290,6 +253,14 @@ def _median(values):
     if n % 2 == 1:
         return sorted_vals[mid]
     return (sorted_vals[mid - 1] + sorted_vals[mid]) / 2.0
+
+
+def _mean(values):
+    """Compute mean of numeric iterable."""
+    if not values:
+        return None
+    values_float = [float(value) for value in values]
+    return sum(values_float) / len(values_float)
 
 
 def _species_topology_from_newick(species_tree_newick, abc_triplet):
@@ -331,6 +302,8 @@ def _run_triplet_pipeline_from_observations(
     observations,
     alpha_dct=0.01,
     alpha_ks=0.05,
+    discordant_test="chi-square",
+    summary_statistic="mean",
     species_topology=TOPOLOGY_AB,
     species_tree_newick=None,
     rng=None,
@@ -356,9 +329,14 @@ def _run_triplet_pipeline_from_observations(
     n_con = topology_counts[con_topology]
     n_dis1 = topology_counts[dis1_topology]
     n_dis2 = topology_counts[dis2_topology]
-    
 
-    _, dct_p_value = two_sided_discordant_z_test(n_dis1, n_dis2)
+    if summary_statistic not in SUMMARY_STATISTIC_CHOICES:
+        raise ValueError(
+            f"Unsupported summary statistic: {summary_statistic}. "
+            f"Choose one of: {', '.join(SUMMARY_STATISTIC_CHOICES)}"
+        )
+
+    _, dct_p_value = run_discordant_count_test(n_dis1, n_dis2, method=discordant_test)
     dct_significant = dct_p_value <= alpha_dct
 
     if not dct_significant:
@@ -385,8 +363,9 @@ def _run_triplet_pipeline_from_observations(
             ks_p_value=None,
             ks_statistic=None,
             ks_significant=None,
-            median_con=None,
-            median_dis=None,
+            summary_statistic=summary_statistic,
+            summary_con=None,
+            summary_dis=None,
             classification="no_introgression",
             analyzed_trees=analyzed_trees,
         )
@@ -418,20 +397,25 @@ def _run_triplet_pipeline_from_observations(
             ks_p_value=ks_p_value,
             ks_statistic=ks_statistic,
             ks_significant=False,
-            median_con=None,
-            median_dis=None,
-            classification="outflow_introgression",
+            summary_statistic=summary_statistic,
+            summary_con=None,
+            summary_dis=None,
+            classification="inflow_introgression",
             analyzed_trees=analyzed_trees,
         )
 
-    median_con = _median(heights[con_topology])
-    median_dis = _median(heights[dis1_topology])
+    if summary_statistic == "mean":
+        summary_con = _mean(heights[con_topology])
+        summary_dis = _mean(heights[dis1_topology])
+    else:
+        summary_con = _median(heights[con_topology])
+        summary_dis = _median(heights[dis1_topology])
 
-    if median_con is None or median_dis is None:
+    if summary_con is None or summary_dis is None:
         classification = "unresolved"
-    elif median_con > median_dis:
-        classification = "inflow_introgression"
-    elif median_con < median_dis:
+    elif summary_con > summary_dis:
+        classification = "outflow_introgression"
+    elif summary_con < summary_dis:
         classification = "ghost_introgression"
     else:
         classification = "unresolved"
@@ -459,8 +443,9 @@ def _run_triplet_pipeline_from_observations(
         ks_p_value=ks_p_value,
         ks_statistic=ks_statistic,
         ks_significant=True,
-        median_con=median_con,
-        median_dis=median_dis,
+        summary_statistic=summary_statistic,
+        summary_con=summary_con,
+        summary_dis=summary_dis,
         classification=classification,
         analyzed_trees=analyzed_trees,
     )
@@ -471,6 +456,8 @@ def run_triplet_pipeline(
     triplet_gene_trees,
     alpha_dct=0.01,
     alpha_ks=0.05,
+    discordant_test="chi-square",
+    summary_statistic="mean",
     species_topology=TOPOLOGY_AB,
     species_tree_newick=None,
     rng=None,
@@ -483,6 +470,8 @@ def run_triplet_pipeline(
         triplet_gene_trees: Iterable of rooted triplet gene tree Newick strings.
         alpha_dct: Significance threshold for DCT-like Z test.
         alpha_ks: Significance threshold for THT (KS test).
+        discordant_test: Discordant count test method (`chi-square` or `z-test`).
+        summary_statistic: Statistic used after KS for con/dis1 distributions (`mean` or `median`).
         species_topology: Species-tree topology string for this triplet.
         species_tree_newick: Species-tree triplet Newick string for this triplet.
         rng: Optional randomizer for tie-breaking topology ranks.
@@ -496,6 +485,8 @@ def run_triplet_pipeline(
         observations,
         alpha_dct=alpha_dct,
         alpha_ks=alpha_ks,
+        discordant_test=discordant_test,
+        summary_statistic=summary_statistic,
         species_topology=species_topology,
         species_tree_newick=species_tree_newick,
         rng=rng,
@@ -582,7 +573,7 @@ def _resolve_processes(processes):
 
 def _analyze_triplet_entry(args):
     """Analyze one triplet map entry in a worker process."""
-    triplet, entry, alpha_dct, alpha_ks = args
+    triplet, entry, alpha_dct, alpha_ks, discordant_test, summary_statistic = args
     species_topology = _species_topology_from_newick(entry.get("species_tree"), triplet)
     observations = _serialize_triplet_gene_trees(triplet, entry["gene_trees"])
     return _run_triplet_pipeline_from_observations(
@@ -590,6 +581,8 @@ def _analyze_triplet_entry(args):
         observations,
         alpha_dct=alpha_dct,
         alpha_ks=alpha_ks,
+        discordant_test=discordant_test,
+        summary_statistic=summary_statistic,
         species_topology=species_topology,
         species_tree_newick=entry.get("species_tree"),
     )
@@ -599,11 +592,25 @@ def analyze_triplet_gene_tree_file(
     filepath,
     alpha_dct=0.01,
     alpha_ks=0.05,
+    discordant_test="chi-square",
+    summary_statistic="mean",
     rng=None,
     use_multiprocessing=True,
     processes=None,
 ):
     """Analyze all triplets from a triplet-gene-trees file."""
+    if discordant_test not in DISCORDANT_TEST_CHOICES:
+        raise ValueError(
+            f"Unsupported discordant test method: {discordant_test}. "
+            f"Choose one of: {', '.join(DISCORDANT_TEST_CHOICES)}"
+        )
+
+    if summary_statistic not in SUMMARY_STATISTIC_CHOICES:
+        raise ValueError(
+            f"Unsupported summary statistic: {summary_statistic}. "
+            f"Choose one of: {', '.join(SUMMARY_STATISTIC_CHOICES)}"
+        )
+
     triplet_map = parse_triplet_gene_trees_file(filepath)
     items = list(triplet_map.items())
     if not items:
@@ -614,7 +621,10 @@ def analyze_triplet_gene_tree_file(
     worker_count = max(1, min(worker_count, len(items)))
 
     if use_multiprocessing and worker_count > 1 and rng is None:
-        args = [(triplet, entry, alpha_dct, alpha_ks) for triplet, entry in items]
+        args = [
+            (triplet, entry, alpha_dct, alpha_ks, discordant_test, summary_statistic)
+            for triplet, entry in items
+        ]
         chunksize = max(1, len(args) // (worker_count * 4))
         ctx = _get_mp_context()
         with ctx.Pool(processes=worker_count) as pool:
@@ -629,6 +639,8 @@ def analyze_triplet_gene_tree_file(
                 entry["gene_trees"],
                 alpha_dct=alpha_dct,
                 alpha_ks=alpha_ks,
+                discordant_test=discordant_test,
+                summary_statistic=summary_statistic,
                 species_topology=species_topology,
                 species_tree_newick=entry.get("species_tree"),
                 rng=rng,
@@ -671,8 +683,9 @@ def write_pipeline_results(results, output_filepath):
         "ks_statistic",
         "ks_p_value",
         "ks_significant",
-        "median_con",
-        "median_dis",
+        "summary_statistic",
+        "summary_con",
+        "summary_dis",
         "classification",
         "analyzed_trees",
     ]
@@ -700,8 +713,9 @@ def write_pipeline_results(results, output_filepath):
                 "" if result.ks_statistic is None else f"{result.ks_statistic:.12g}",
                 "" if result.ks_p_value is None else f"{result.ks_p_value:.12g}",
                 "" if result.ks_significant is None else str(result.ks_significant),
-                "" if result.median_con is None else f"{result.median_con:.12g}",
-                "" if result.median_dis is None else f"{result.median_dis:.12g}",
+                result.summary_statistic,
+                "" if result.summary_con is None else f"{result.summary_con:.12g}",
+                "" if result.summary_dis is None else f"{result.summary_dis:.12g}",
                 result.classification,
                 str(result.analyzed_trees),
             ]
@@ -720,6 +734,18 @@ def main():
     )
     parser.add_argument("--alpha-dct", type=float, default=0.01, help="DCT significance threshold (default: 0.01)")
     parser.add_argument("--alpha-ks", type=float, default=0.05, help="KS significance threshold (default: 0.05)")
+    parser.add_argument(
+        "--discordant-test",
+        choices=DISCORDANT_TEST_CHOICES,
+        default="chi-square",
+        help="Discordant count test to use (default: chi-square)",
+    )
+    parser.add_argument(
+        "--summary-statistic",
+        choices=SUMMARY_STATISTIC_CHOICES,
+        default="mean",
+        help="Statistic used for con/dis1 distributions after KS test (default: mean)",
+    )
     parser.add_argument(
         "-p",
         "--processes",
@@ -741,6 +767,8 @@ def main():
         str(input_path),
         alpha_dct=args.alpha_dct,
         alpha_ks=args.alpha_ks,
+        discordant_test=args.discordant_test,
+        summary_statistic=args.summary_statistic,
         use_multiprocessing=not args.no_multiprocessing,
         processes=args.processes,
     )
