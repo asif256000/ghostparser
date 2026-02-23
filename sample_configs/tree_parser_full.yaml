@@ -3,3 +3,8 @@ gene_trees_path: data/asuv21/gene_trees.tree
 outgroups:
 	- Ephemera_danica
 	- Isonychia_kiangsinensis
+output_folder: asuv_results
+processes: 0
+triplet_filter: data/asuv21/asuv_all/triplet_filter.txt
+min_support_value: 0.5
+no_multiprocessing: false
