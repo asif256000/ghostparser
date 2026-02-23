@@ -77,6 +77,10 @@ def load_orchestrator_config(config_file: str) -> dict:
     - processes
     - triplet_filter
     - min_support_value
+    - discordant_test
+    - summary_statistic
+    - alpha_dct
+    - alpha_ks
     """
     payload = _load_raw_config(config_file)
 
@@ -112,6 +116,30 @@ def load_orchestrator_config(config_file: str) -> dict:
         except (TypeError, ValueError) as exc:
             raise ConfigError("Config field min_support_value must be a numeric value") from exc
 
+    discordant_test = payload.get("discordant_test")
+    if discordant_test is not None:
+        if not isinstance(discordant_test, str) or discordant_test not in {"chi-square", "z-test"}:
+            raise ConfigError("Config field discordant_test must be one of: chi-square, z-test")
+
+    summary_statistic = payload.get("summary_statistic")
+    if summary_statistic is not None:
+        if not isinstance(summary_statistic, str) or summary_statistic not in {"mean", "median"}:
+            raise ConfigError("Config field summary_statistic must be one of: mean, median")
+
+    alpha_dct = payload.get("alpha_dct")
+    if alpha_dct is not None:
+        try:
+            alpha_dct = float(alpha_dct)
+        except (TypeError, ValueError) as exc:
+            raise ConfigError("Config field alpha_dct must be a numeric value") from exc
+
+    alpha_ks = payload.get("alpha_ks")
+    if alpha_ks is not None:
+        try:
+            alpha_ks = float(alpha_ks)
+        except (TypeError, ValueError) as exc:
+            raise ConfigError("Config field alpha_ks must be a numeric value") from exc
+
     return {
         "species_tree": species_tree,
         "gene_trees": gene_trees,
@@ -120,4 +148,8 @@ def load_orchestrator_config(config_file: str) -> dict:
         "output": output,
         "processes": processes,
         "min_support_value": min_support_value,
+        "discordant_test": discordant_test,
+        "summary_statistic": summary_statistic,
+        "alpha_dct": alpha_dct,
+        "alpha_ks": alpha_ks,
     }
