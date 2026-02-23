@@ -214,7 +214,7 @@ This file summarizes inputs, outputs, and intent for each test function. Shared 
 	- Output: correct topology labels for species triplet `(A,B,C)`
 	- Purpose: verify topology classification.
 
-- test_two_sided_discordant_z_test_balanced_counts_not_significant
+- test_pearson_discordant_chi_square_balanced_counts_not_significant
 	- Inputs: equal discordant counts
 	- Output: `z=0`, `p=1`
 	- Purpose: validate DCT baseline behavior.
@@ -224,15 +224,15 @@ This file summarizes inputs, outputs, and intent for each test function. Shared 
 	- Output: `classification == no_introgression`
 	- Purpose: verify early stop after DCT.
 
-- test_run_triplet_pipeline_outflow_when_ks_not_significant
+- test_run_triplet_pipeline_inflow_when_ks_not_significant
 	- Inputs: significant DCT with similar `H(T)` distributions
-	- Output: `classification == outflow_introgression`
+	- Output: `classification == inflow_introgression`
 	- Purpose: verify THT non-significant branch.
 
-- test_run_triplet_pipeline_inflow_when_con_median_higher
+- test_run_triplet_pipeline_outflow_when_con_median_higher
 	- Inputs: significant DCT and KS, with `median(H_con) > median(H_dis)`
-	- Output: `classification == inflow_introgression`
-	- Purpose: verify inflow decision rule.
+	- Output: `classification == outflow_introgression`
+	- Purpose: verify outflow decision rule.
 
 - test_run_triplet_pipeline_ghost_when_dis_median_higher
 	- Inputs: significant DCT and KS, with `median(H_con) < median(H_dis)`
