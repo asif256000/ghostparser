@@ -153,3 +153,146 @@ def load_orchestrator_config(config_file: str) -> dict:
         "alpha_dct": alpha_dct,
         "alpha_ks": alpha_ks,
     }
+
+
+def load_tree_parser_config(config_file: str) -> dict:
+    """Load and normalize tree_parser config values.
+
+    Required keys:
+    - species_tree_path
+    - gene_trees_path
+    - outgroup or outgroups
+
+    Supported optional keys:
+    - output_folder
+    - processes
+    - triplet_filter
+    - min_support_value
+    - no_multiprocessing
+    """
+    payload = _load_raw_config(config_file)
+
+    species_tree = _validate_required_string(payload, "species_tree_path")
+    gene_trees = _validate_required_string(payload, "gene_trees_path")
+
+    outgroups_source = payload.get("outgroups")
+    if outgroups_source is None:
+        outgroups_source = payload.get("outgroup")
+    outgroups = _parse_outgroups(outgroups_source)
+
+    output = payload.get("output_folder")
+    if output is not None:
+        if not isinstance(output, str) or not output.strip():
+            raise ConfigError("Config field output_folder must be a non-empty string when provided")
+        output = output.strip()
+
+    triplet_filter = payload.get("triplet_filter")
+    if triplet_filter is not None:
+        if not isinstance(triplet_filter, str) or not triplet_filter.strip():
+            raise ConfigError("Config field triplet_filter must be a non-empty string when provided")
+        triplet_filter = triplet_filter.strip()
+
+    processes = payload.get("processes")
+    if processes is not None:
+        if not isinstance(processes, int) or processes < 0:
+            raise ConfigError("Config field processes must be an integer >= 0")
+
+    min_support_value = payload.get("min_support_value")
+    if min_support_value is not None:
+        try:
+            min_support_value = float(min_support_value)
+        except (TypeError, ValueError) as exc:
+            raise ConfigError("Config field min_support_value must be a numeric value") from exc
+
+    no_multiprocessing = payload.get("no_multiprocessing")
+    if no_multiprocessing is not None and not isinstance(no_multiprocessing, bool):
+        raise ConfigError("Config field no_multiprocessing must be a boolean when provided")
+
+    return {
+        "species_tree": species_tree,
+        "gene_trees": gene_trees,
+        "outgroup": outgroups,
+        "triplet_filter": triplet_filter,
+        "output": output,
+        "processes": processes,
+        "min_support_value": min_support_value,
+        "no_multiprocessing": no_multiprocessing,
+    }
+
+
+def load_triplet_processor_config(config_file: str) -> dict:
+    """Load and normalize triplet_processor config values.
+
+    Required keys:
+    - input_path
+
+    Supported optional keys:
+    - output_path
+    - stats_output
+    - alpha_dct
+    - alpha_ks
+    - discordant_test
+    - summary_statistic
+    - processes
+    - no_multiprocessing
+    """
+    payload = _load_raw_config(config_file)
+
+    input_path = _validate_required_string(payload, "input_path")
+
+    output_path = payload.get("output_path")
+    if output_path is not None:
+        if not isinstance(output_path, str) or not output_path.strip():
+            raise ConfigError("Config field output_path must be a non-empty string when provided")
+        output_path = output_path.strip()
+
+    stats_output = payload.get("stats_output")
+    if stats_output is not None:
+        if not isinstance(stats_output, str) or not stats_output.strip():
+            raise ConfigError("Config field stats_output must be a non-empty string when provided")
+        stats_output = stats_output.strip()
+
+    alpha_dct = payload.get("alpha_dct")
+    if alpha_dct is not None:
+        try:
+            alpha_dct = float(alpha_dct)
+        except (TypeError, ValueError) as exc:
+            raise ConfigError("Config field alpha_dct must be a numeric value") from exc
+
+    alpha_ks = payload.get("alpha_ks")
+    if alpha_ks is not None:
+        try:
+            alpha_ks = float(alpha_ks)
+        except (TypeError, ValueError) as exc:
+            raise ConfigError("Config field alpha_ks must be a numeric value") from exc
+
+    discordant_test = payload.get("discordant_test")
+    if discordant_test is not None:
+        if not isinstance(discordant_test, str) or discordant_test not in {"chi-square", "z-test"}:
+            raise ConfigError("Config field discordant_test must be one of: chi-square, z-test")
+
+    summary_statistic = payload.get("summary_statistic")
+    if summary_statistic is not None:
+        if not isinstance(summary_statistic, str) or summary_statistic not in {"mean", "median"}:
+            raise ConfigError("Config field summary_statistic must be one of: mean, median")
+
+    processes = payload.get("processes")
+    if processes is not None:
+        if not isinstance(processes, int) or processes < 0:
+            raise ConfigError("Config field processes must be an integer >= 0")
+
+    no_multiprocessing = payload.get("no_multiprocessing")
+    if no_multiprocessing is not None and not isinstance(no_multiprocessing, bool):
+        raise ConfigError("Config field no_multiprocessing must be a boolean when provided")
+
+    return {
+        "input": input_path,
+        "output": output_path,
+        "stats_output": stats_output,
+        "alpha_dct": alpha_dct,
+        "alpha_ks": alpha_ks,
+        "discordant_test": discordant_test,
+        "summary_statistic": summary_statistic,
+        "processes": processes,
+        "no_multiprocessing": no_multiprocessing,
+    }
