@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 import json
+import math
 import multiprocessing as mp
 from multiprocessing import cpu_count
 from pathlib import Path
@@ -195,7 +196,24 @@ def _resolve_topology_roles(topology_counts, species_topology):
 
 
 def pearson_discordant_chi_square_test(n_dis1, n_dis2):
-    """Pearson chi-square test for discordant topology count imbalance."""
+    """Custom Pearson chi-square test for discordant topology count imbalance.
+
+    This matches the SciPy default setup for two categories with equal expected
+    frequencies and computes the p-value analytically for df=1.
+    """
+    total = n_dis1 + n_dis2
+    if total == 0:
+        return 0.0, 1.0
+
+    expected = total / 2.0
+    chi2_stat = ((n_dis1 - expected) ** 2) / expected + ((n_dis2 - expected) ** 2) / expected
+
+    p_value = math.erfc(math.sqrt(chi2_stat / 2.0))
+    return float(chi2_stat), float(p_value)
+
+
+def _pearson_discordant_chi_square_test_scipy(n_dis1, n_dis2):
+    """Backup SciPy Pearson chi-square implementation."""
     total = n_dis1 + n_dis2
     if total == 0:
         return 0.0, 1.0
@@ -236,7 +254,75 @@ def run_discordant_count_test(n_dis1, n_dis2, method="chi-square"):
 
 
 def two_sample_ks_test(sample_a, sample_b):
-    """Two-sample KS test returning (D, p-value)."""
+    """Custom two-sample KS test returning (D, p-value).
+
+    Uses the standard two-sided asymptotic Kolmogorov approximation for p-value:
+    Q_K(lambda) = 2 * sum_{j>=1} (-1)^(j-1) exp(-2*j^2*lambda^2),
+    with finite-sample lambda correction.
+    """
+    if not sample_a or not sample_b:
+        return 0.0, 1.0
+
+    data_a = sorted(float(value) for value in sample_a)
+    data_b = sorted(float(value) for value in sample_b)
+    n1 = len(data_a)
+    n2 = len(data_b)
+
+    i = 0
+    j = 0
+    cdf_a = 0.0
+    cdf_b = 0.0
+    d_stat = 0.0
+
+    while i < n1 and j < n2:
+        a_val = data_a[i]
+        b_val = data_b[j]
+        if a_val <= b_val:
+            while i < n1 and data_a[i] == a_val:
+                i += 1
+            cdf_a = i / n1
+        if b_val <= a_val:
+            while j < n2 and data_b[j] == b_val:
+                j += 1
+            cdf_b = j / n2
+        d_stat = max(d_stat, abs(cdf_a - cdf_b))
+
+    while i < n1:
+        i += 1
+        cdf_a = i / n1
+        d_stat = max(d_stat, abs(cdf_a - cdf_b))
+
+    while j < n2:
+        j += 1
+        cdf_b = j / n2
+        d_stat = max(d_stat, abs(cdf_a - cdf_b))
+
+    en = (n1 * n2) / (n1 + n2)
+    if en <= 0:
+        return float(d_stat), 1.0
+
+    sqrt_en = math.sqrt(en)
+    lam = (sqrt_en + 0.12 + 0.11 / sqrt_en) * d_stat
+
+    if lam <= 0:
+        p_value = 1.0
+    else:
+        series_sum = 0.0
+        for k in range(1, 101):
+            term = math.exp(-2.0 * (k**2) * (lam**2))
+            if k % 2 == 1:
+                series_sum += term
+            else:
+                series_sum -= term
+            if term < 1e-12:
+                break
+        p_value = max(0.0, min(1.0, 2.0 * series_sum))
+
+    return float(d_stat), float(p_value)
+
+
+def _two_sample_ks_test_scipy(sample_a, sample_b):
+    """Backup SciPy two-sample KS implementation."""
     if not sample_a or not sample_b:
         return 0.0, 1.0
 
