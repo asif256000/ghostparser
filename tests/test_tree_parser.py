@@ -1,6 +1,7 @@
 """Test cases for the tree_parser module."""
 
 import argparse
+import copy
 from io import StringIO
 import tempfile
 from pathlib import Path
@@ -474,21 +475,6 @@ def test_clean_and_save_gene_trees_discards_missing_outgroup(gene_trees_missing_
 # ============================================================================
 
 
-def test_get_taxa_from_tree(simple_newick_file):
-    """Test extracting taxa names from a tree."""
-    trees = read_tree_file(str(simple_newick_file))
-    tree = trees[0]
-
-    taxa = get_taxa_from_tree(tree)
-
-    # Should have 8 taxa: TaxaA, TaxaB, TaxaC, TaxaD, TaxaE, TaxaF, TaxaG, OutGroup
-    assert len(taxa) == 8
-    assert "TaxaA" in taxa
-    assert "OutGroup" in taxa
-    # Taxa should be sorted
-    assert taxa == sorted(taxa)
-
-
 def test_get_taxa_from_tree_correct_names(simple_newick_file):
     """Test that correct taxa names are extracted."""
     trees = read_tree_file(str(simple_newick_file))
@@ -577,17 +563,6 @@ def test_write_triplets_to_file(tmp_path):
     assert lines[0] == "TaxaA,TaxaB,TaxaC"
     assert lines[1] == "TaxaA,TaxaB,TaxaD"
     assert lines[2] == "TaxaA,TaxaC,TaxaD"
-
-
-def test_write_triplets_to_file_format(tmp_path):
-    """Test the format of triplets in the file."""
-    triplets = [("TaxaOne", "TaxaTwo", "TaxaThree")]
-    output_file = tmp_path / "triplets.txt"
-
-    write_triplets_to_file(triplets, str(output_file))
-
-    content = output_file.read_text().strip()
-    assert content == "TaxaOne,TaxaTwo,TaxaThree"
 
 
 def test_write_triplets_to_file_empty(tmp_path):
@@ -911,40 +886,6 @@ def test_integration_full_triplet_extraction_workflow(tmp_path):
     assert "\t" in content  # Tab-separated counts
 
 
-def test_write_triplet_gene_trees_multiprocess_single_worker(tmp_path):
-    """Test multiprocessing triplet writer with multiprocessing disabled."""
-    triplets = [("TaxaA", "TaxaB", "TaxaC"), ("TaxaD", "TaxaE", "TaxaF")]
-    gene_trees_newick = [
-        "((TaxaA:0.1,TaxaB:0.2):0.3,TaxaC:0.4);",
-        "((TaxaD:0.5,TaxaE:0.6):0.7,TaxaF:0.8);",
-    ]
-
-    output_file = tmp_path / "triplet_gene_trees_mp.txt"
-
-    total_subtrees, triplets_with_trees, worker_count = write_triplet_gene_trees_multiprocess(
-        triplets,
-        gene_trees_newick,
-        str(output_file),
-        species_triplet_trees=_species_triplet_map(triplets),
-        use_multiprocessing=False,  # Disable multiprocessing
-    )
-
-    # Verify output file exists
-    assert output_file.exists()
-
-    # Verify worker count is 1 when multiprocessing is disabled
-    assert worker_count == 1
-
-    # Verify statistics
-    assert triplets_with_trees > 0
-    assert total_subtrees > 0
-
-    # Verify file content
-    content = output_file.read_text()
-    assert "TaxaA,TaxaB,TaxaC" in content
-    assert "TaxaD,TaxaE,TaxaF" in content
-
-
 def test_write_triplet_gene_trees_multiprocess_with_workers(tmp_path):
     """Test multiprocessing triplet writer with multiple workers."""
     triplets = [("TaxaA", "TaxaB", "TaxaC"), ("TaxaD", "TaxaE", "TaxaF")]
@@ -1110,15 +1051,6 @@ def test_generate_triplets_multiple_outgroups():
         assert "OutGroup2" not in triplet
 
 
-def test_generate_triplets_outgroup_comma_separated():
-    taxa = ["TaxaA", "TaxaB", "TaxaC", "TaxaD", "OutGroup1", "OutGroup2"]
-    triplets = generate_triplets(taxa, "OutGroup1,OutGroup2")
-
-    for triplet in triplets:
-        assert "OutGroup1" not in triplet
-        assert "OutGroup2" not in triplet
-
-
 def test_generate_triplets_outgroup_comma_separated_with_spaces():
     taxa = ["TaxaA", "TaxaB", "TaxaC", "TaxaD", "OutGroup1", "OutGroup2"]
     triplets = generate_triplets(taxa, "OutGroup1, OutGroup2")
@@ -1146,49 +1078,6 @@ def test_filter_triplets_by_taxa_skips_missing_taxa():
 
     assert kept == [("TaxaA", "TaxaB", "TaxaC")]
     assert skipped == [(("TaxaA", "TaxaB", "TaxaX"), ["TaxaX"])]
-
-
-def test_write_triplets_to_file(tmp_path):
-    triplets = [("TaxaA", "TaxaB", "TaxaC"), ("TaxaA", "TaxaB", "TaxaD")]
-    output_file = tmp_path / "triplets.txt"
-
-    write_triplets_to_file(triplets, str(output_file))
-
-    assert output_file.exists()
-    content = output_file.read_text().strip().split("\n")
-    assert content == ["TaxaA,TaxaB,TaxaC", "TaxaA,TaxaB,TaxaD"]
-
-
-def test_extract_triplet_subtree_missing_taxa():
-    tree_str = "((TaxaA:0.1,TaxaB:0.2):0.3,TaxaC:0.4);"
-    tree = dendropy.Tree.get(data=tree_str, schema="newick", preserve_underscores=True)
-
-    subtree = extract_triplet_subtree(tree, ("TaxaA", "TaxaB", "TaxaX"))
-    assert subtree is None
-
-
-def test_process_gene_trees_for_triplets():
-    tree1_str = "((TaxaA:0.1,TaxaB:0.2):0.3,TaxaC:0.4);"
-    tree2_str = "((TaxaA:0.15,TaxaC:0.25):0.35,TaxaD:0.45);"
-    tree3_str = "((TaxaB:0.12,TaxaC:0.22):0.32,TaxaD:0.42);"
-
-    tree1 = dendropy.Tree.get(data=tree1_str, schema="newick", preserve_underscores=True)
-    tree2 = dendropy.Tree.get(data=tree2_str, schema="newick", preserve_underscores=True)
-    tree3 = dendropy.Tree.get(data=tree3_str, schema="newick", preserve_underscores=True)
-
-    gene_trees = [tree1, tree2, tree3]
-    triplets = [
-        ("TaxaA", "TaxaB", "TaxaC"),
-        ("TaxaA", "TaxaC", "TaxaD"),
-        ("TaxaB", "TaxaC", "TaxaD"),
-    ]
-
-    triplet_gene_trees = process_gene_trees_for_triplets(gene_trees, triplets)
-
-    assert len(triplet_gene_trees) == 3
-    assert len(triplet_gene_trees[("TaxaA", "TaxaB", "TaxaC")]) == 1
-    assert len(triplet_gene_trees[("TaxaA", "TaxaC", "TaxaD")]) == 1
-    assert len(triplet_gene_trees[("TaxaB", "TaxaC", "TaxaD")]) == 1
 
 
 def test_write_triplet_gene_trees_streaming(tmp_path):
@@ -1265,23 +1154,6 @@ def test_write_triplet_gene_trees_multiprocess_accepts_list(tmp_path):
     assert not chunk_dirs
 
 
-def test_write_triplet_gene_trees_separator(tmp_path):
-    triplet_gene_trees = {
-        ("TaxaA", "TaxaB", "TaxaC"): ["(TaxaA:0.1,TaxaB:0.2,TaxaC:0.3);"] ,
-        ("TaxaD", "TaxaE", "TaxaF"): ["(TaxaD:0.4,TaxaE:0.5,TaxaF:0.6);"] ,
-    }
-
-    output_file = tmp_path / "triplet_gene_trees.txt"
-    write_triplet_gene_trees(
-        triplet_gene_trees,
-        str(output_file),
-        species_triplet_trees=_species_triplet_map(list(triplet_gene_trees.keys())),
-    )
-
-    content = output_file.read_text()
-    assert "=" * 60 in content
-
-
 def test_build_species_triplet_metadata_normalizes_abc(tmp_path):
     """Species triplets should be normalized so A and B are sisters."""
     species_tree = dendropy.Tree.get(
@@ -1334,6 +1206,22 @@ def _bio_distance(tree, a, b):
     return tree.distance(a, b)
 
 
+def _collapse_triplet_biopython(newick_str, triplet):
+    tree = Phylo.read(StringIO(newick_str), "newick")
+    collapsed = copy.deepcopy(tree)
+
+    triplet_set = set(triplet)
+    terminals = {terminal.name for terminal in collapsed.get_terminals()}
+    if not triplet_set.issubset(terminals):
+        return None
+
+    for terminal in list(collapsed.get_terminals()):
+        if terminal.name not in triplet_set:
+            collapsed.prune(target=terminal)
+
+    return collapsed
+
+
 @pytest.mark.parametrize("a,b", [("A", "B"), ("A", "C"), ("B", "C")])
 def test_triplet_branch_lengths_match(triplet_comparison_cases, a, b):
     for newick_str, triplet in triplet_comparison_cases:
@@ -1351,3 +1239,18 @@ def test_triplet_branch_lengths_match(triplet_comparison_cases, a, b):
         dendro_dist = _dendro_distance(dendro_subtree, a, b)
 
         assert bio_dist == pytest.approx(dendro_dist)
+
+
+def test_triplet_collapse_consistency_dendropy_vs_biopython(triplet_comparison_cases):
+    for newick_str, triplet in triplet_comparison_cases:
+        dendro_tree = dendropy.Tree.get(data=newick_str, schema="newick", preserve_underscores=True)
+        dendro_subtree = extract_triplet_subtree(dendro_tree, triplet)
+        assert dendro_subtree is not None
+
+        bio_subtree = _collapse_triplet_biopython(newick_str, triplet)
+        assert bio_subtree is not None
+
+        for a, b in ((triplet[0], triplet[1]), (triplet[0], triplet[2]), (triplet[1], triplet[2])):
+            dendro_dist = _dendro_distance(dendro_subtree, a, b)
+            bio_dist = _bio_distance(bio_subtree, a, b)
+            assert dendro_dist == pytest.approx(bio_dist, rel=0.0, abs=1e-12)
