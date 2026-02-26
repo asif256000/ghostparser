@@ -267,3 +267,65 @@ This file summarizes inputs, outputs, and intent for each test function. Shared 
 	- Output: parse + analyze + write TSV succeed with expected fields
 	- Purpose: validate file-oriented pipeline workflow.
 
+## Runtime Argument Resolution and Process Defaults
+
+### Orchestrator (`tests/test_orchestrator.py`)
+
+- `test_resolve_runtime_args_cli_custom_processes_preserved`
+	- Inputs: CLI mode with `processes=5`
+	- Output: `resolved.processes == 5`
+	- Purpose: CLI-provided process count is preserved when config mode is not used.
+
+- `test_resolve_runtime_args_config_processes_preserved_when_set`
+	- Inputs: config mode with `"processes": 4`
+	- Output: `resolved.processes == 4`
+	- Purpose: config-provided process count is preserved.
+
+- `test_resolve_runtime_args_config_with_cli_warns_and_ignores`
+	- Inputs: config mode where config omits `processes` and CLI passes non-default `processes`
+	- Output: `resolved.processes == 0`
+	- Purpose: config-mode default (`0`) is used when `processes` is omitted in config.
+
+### Tree Parser (`tests/test_tree_parser.py`)
+
+- `test_resolve_runtime_args_tree_parser_cli_custom_processes_preserved`
+	- Inputs: CLI mode with `processes=6`
+	- Output: `resolved.processes == 6`
+	- Purpose: CLI-provided process count is preserved.
+
+- `test_resolve_runtime_args_tree_parser_config_warns_and_ignores`
+	- Inputs: config mode with `"processes": 3`
+	- Output: `resolved.processes == 3`
+	- Purpose: config-provided process count is preserved.
+
+- `test_resolve_runtime_args_tree_parser_config_defaults_processes_to_zero`
+	- Inputs: config mode without `processes`, CLI passes non-default `processes`
+	- Output: `resolved.processes == 0`
+	- Purpose: config-mode default (`0`) is used when key is omitted.
+
+### Triplet Processor (`tests/test_triplet_processor.py`)
+
+- `test_resolve_runtime_args_triplet_processor_cli_custom_processes_preserved`
+	- Inputs: CLI mode with `processes=8`
+	- Output: `resolved.processes == 8`
+	- Purpose: CLI-provided process count is preserved.
+
+- `test_resolve_runtime_args_triplet_processor_config_processes_preserved_when_set`
+	- Inputs: config mode with `"processes": 3`
+	- Output: `resolved.processes == 3`
+	- Purpose: config-provided process count is preserved.
+
+- `test_resolve_runtime_args_triplet_processor_config_defaults_processes_to_zero`
+	- Inputs: config mode without `processes`, CLI passes non-default `processes`
+	- Output: `resolved.processes == 0`
+	- Purpose: config-mode default (`0`) is used when key is omitted.
+
+### Config Loaders (`tests/test_config.py`)
+
+- `test_load_orchestrator_config_defaults_processes_to_zero`
+- `test_load_tree_parser_config_defaults_processes_to_zero`
+- `test_load_triplet_processor_config_defaults_processes_to_zero`
+	- Inputs: valid config payloads with required fields and no `processes` key
+	- Output: parsed config has `processes == 0`
+	- Purpose: enforce process defaulting at config layer.
+
