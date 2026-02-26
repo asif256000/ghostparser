@@ -1,331 +1,180 @@
 # Test Suite Documentation
 
-There are comprehensive test coverage with test cases organized into multiple categories.
+This suite provides canonical (non-redundant) coverage grouped by functional area.
 
 ## Running Tests
 
-### Run All Tests
+### Run all tests
 
 ```bash
 pytest
 ```
 
-### Run Specific Test File
+### Run one test file
 
 ```bash
 pytest tests/test_tree_parser.py
 ```
 
-### Run Specific Test
+### Run one test
 
 ```bash
 pytest tests/test_tree_parser.py::test_extract_triplet_subtree_all_taxa_present
 ```
 
-### Run Tests with Coverage (requires `pytest-cov`)
-
-Install the plugin if you don't have it:
-
-```bash
-pip install pytest-cov
-```
-
-Then run:
-
-```bash
-pytest --cov=ghostparser --cov-report=html
-```
-
-### Run SciPy Reference Comparison Tests
-
-These tests are marked with `pytest.mark.reference` and validate custom statistical helpers against SciPy reference behavior.
-
-Run only reference tests:
+### Run reference tests (SciPy parity checks)
 
 ```bash
 pytest -m reference
 ```
 
-Run all tests except reference tests:
+Run non-reference tests:
 
 ```bash
 pytest -m "not reference"
 ```
 
-Current reference-marked tests in `tests/test_triplet_processor.py`:
-
+Reference-marked tests in `tests/test_triplet_processor.py`:
 - `test_custom_chi_square_matches_scipy_reference_randomized`
 - `test_custom_ks_matches_scipy_asymptotic_reference_randomized`
 - `test_two_sample_ks_test_hybrid_uses_scipy_near_threshold`
 
-# Test Catalog
+## Shared Fixtures (`tests/fixtures.py`)
 
-This file summarizes inputs, outputs, and intent for each test function. Shared fixtures live in tests/fixtures.py.
+- `simple_newick_file`
+  - Input fixture content:
+    - `(TaxaA:0.001,(TaxaB:0.098,(((TaxaC:0.001,TaxaD:0.001):0.001,TaxaE:0.001):0.086,(TaxaF:0.001,TaxaG:0.001):0.032):0.001):0.012,OutGroup:0.558);`
+  - Used in:
+    - `test_read_tree_file_single_tree`
+    - `test_calculate_average_support_no_values`
+    - `test_standardize_tree_preserves_branch_lengths`
+    - `test_format_newick_with_precision_trailing_zeros`
+    - `test_format_newick_with_precision_default_places`
+    - `test_format_newick_with_custom_precision`
+    - `test_write_clean_trees`
+    - `test_clean_and_save_trees_no_filters`
+    - `test_clean_and_save_trees_creates_output_file`
+    - `test_get_taxa_from_tree_correct_names`
+    - `test_integration_full_workflow`
+    - `test_integration_triplets_workflow`
+  - Expectations:
+    - parsing returns one valid tree
+    - average support is `None` when no support labels are present
+    - branch lengths are preserved through standardization
+    - formatted Newick remains valid and precision behavior is respected
+    - cleaned output files are created and non-empty
+    - extracted taxa match the expected sorted taxa set
+    - integration workflows produce expected counts and output rows
 
-## Shared Fixtures (tests/fixtures.py)
+- `newick_with_support_file`
+  - Input fixture content:
+    - `(((TaxaC,TaxaD)0.95:0.110599,(TaxaF,TaxaG)0.99:1.860334)0.98:0.500000,OutGroup)0.85;`
+  - Used in:
+    - `test_calculate_average_support_with_values`
+    - `test_remove_support_values`
+    - `test_standardize_tree_removes_support`
+  - Expectations:
+    - average support is computed in the expected range
+    - support labels are removed by cleaning/standardization
+    - tree remains parseable after support removal
 
-- simple_newick_file
-	- Input file name: simple_tree.nwk
-	- File content (Newick):
-		- (TaxaA:0.001,(TaxaB:0.098,(((TaxaC:0.001,TaxaD:0.001):0.001,TaxaE:0.001):0.086,(TaxaF:0.001,TaxaG:0.001):0.032):0.001):0.012,OutGroup:0.558);
-	- Used in tests (expected outputs):
-		- test_read_tree_file_single_tree: len(trees) == 1 and trees[0] is Tree
-		- test_calculate_average_support_no_values: avg_support is None
-		- test_standardize_tree_preserves_branch_lengths: branch lengths unchanged within 1e-10
-		- test_format_newick_with_precision_trailing_zeros: no "0000000000" and endswith ";"
-		- test_format_newick_with_precision_default_places: contains "(" and ")" and endswith ";"
-		- test_format_newick_with_custom_precision: endswith ";" and decimal parts length <= 5
-		- test_write_clean_trees: output exists and len(output_trees) == 1
-		- test_clean_and_save_trees_no_filters: cleaned == 1 and dropped == 0
-		- test_clean_and_save_trees_creates_output_file: output exists and size > 0
-		- test_get_taxa_from_tree: len(taxa) == 8, contains TaxaA and OutGroup, sorted
-		- test_get_taxa_from_tree_correct_names: taxa == ["OutGroup", "TaxaA", "TaxaB", "TaxaC", "TaxaD", "TaxaE", "TaxaF", "TaxaG"]
-		- test_integration_full_workflow: len(output_trees) == 1
-		- test_integration_triplets_workflow: len(taxa) == 8, len(triplets) == 35, len(lines) == 35
+- `multiple_trees_file`
+  - Input fixture content:
+    - 3 Newick trees (one per line) with shared taxa set and varying topology
+  - Used in:
+    - `test_read_tree_file_multiple_trees`
+    - `test_write_clean_trees_multiple`
+  - Expectations:
+    - parser returns all trees in the file
+    - cleaned write/read roundtrip preserves tree count
 
-- newick_with_support_file
-	- Input file name: tree_with_support.nwk
-	- File content (Newick with support):
-		- (((TaxaC,TaxaD)0.95:0.110599,(TaxaF,TaxaG)0.99:1.860334)0.98:0.500000,OutGroup)0.85;
-	- Used in tests (expected outputs):
-		- test_calculate_average_support_with_values: 0.93 < avg_support < 0.95
-		- test_remove_support_values: avg_support becomes None after removal
-		- test_standardize_tree_removes_support: avg_support is None
+- `low_support_tree_file`
+  - Input fixture content:
+    - one high-support tree and one low-support tree
+  - Used in:
+    - `test_clean_and_save_trees_filters_low_support`
+  - Expectations:
+    - low-support tree is dropped
+    - dropped index metadata is reported correctly
 
-- multiple_trees_file
-	- Input file name: multiple_trees.nwk
-	- File content (3 lines):
-		- (TaxaA:0.001,(TaxaB:0.098,(TaxaC:0.001,TaxaD:0.001):0.001):0.012,OutGroup:0.558);
-		- (TaxaB:0.098,(TaxaC:0.001,TaxaD:0.001):0.001,OutGroup:0.558);
-		- ((TaxaC:0.001,TaxaD:0.001):0.001,(TaxaB:0.098,TaxaA:0.001):0.012,OutGroup:0.558);
-	- Used in tests (expected outputs):
-		- test_read_tree_file_multiple_trees: len(trees) == 3 and all are Tree
-		- test_write_clean_trees_multiple: len(output_trees) == 3
+- `triplet_comparison_cases`
+  - Input fixture content:
+    - list of `(newick_str, triplet)` pairs for cross-library triplet checks
+  - Used in:
+    - `test_triplet_branch_lengths_match`
+    - `test_triplet_collapse_consistency_dendropy_vs_biopython`
+  - Expectations:
+    - pairwise patristic distances match between DendroPy and BioPython-derived triplet subtrees
+    - DendroPy triplet extraction remains numerically consistent with BioPython prune/collapse behavior
 
-- low_support_tree_file
-	- Input file name: low_support_trees.nwk
-	- File content (2 lines):
-		- (((TaxaC,TaxaD)0.95:0.110599,(TaxaF,TaxaG)0.99:1.860334)0.98:0.500000,OutGroup);
-		- (((TaxaC,TaxaD)0.3:0.110599,(TaxaF,TaxaG)0.2:1.860334)0.4:0.500000,OutGroup);
-	- Used in tests (expected outputs):
-		- test_clean_and_save_trees_filters_low_support: cleaned == 1, dropped == 1, and 2 in dropped
+## Triplet Utilities (`tests/test_tree_parser.py`)
 
-## Triplet Utilities (tests/test_tree_parser.py)
+- `test_generate_triplets_multiple_outgroups`
+  - Confirms list-form outgroups are excluded.
+- `test_generate_triplets_outgroup_comma_separated_with_spaces`
+  - Confirms comma-separated outgroups with whitespace are excluded.
+- `test_read_triplet_filter_file_parses_valid_and_skips_invalid`
+  - Confirms valid triplets are parsed and malformed lines are reported.
+- `test_filter_triplets_by_taxa_skips_missing_taxa`
+  - Confirms triplets with taxa outside available set are skipped.
+- `test_write_triplets_to_file`
+  - Confirms ordered comma-separated output formatting.
+- `test_write_triplet_gene_trees_streaming`
+  - Confirms streaming writer emits valid triplet sections.
+- `test_write_triplet_gene_trees_multiprocess_triplets_single_worker`
+  - Confirms triplet-parallel path with one worker works.
+- `test_write_triplet_gene_trees_multiprocess_accepts_list`
+  - Confirms list input support and chunk cleanup behavior.
+- `test_format_newick_with_precision_triplet_parser`
+  - Confirms formatted Newick terminates with `;`.
 
-- test_generate_triplets_multiple_outgroups
-	- Inputs: taxa list + outgroups
-	- Output: each triplet excludes OutGroup1 and OutGroup2
-	- Purpose: multi-outgroup handling.
+## Triplet Equivalence (`tests/test_tree_parser.py`)
 
-- test_generate_triplets_outgroup_comma_separated
-	- Inputs: taxa list + comma-separated
-	- Output: each triplet excludes OutGroup1 and OutGroup2
-	- Purpose: parsing behavior.
+- `test_triplet_branch_lengths_match` (parametrized)
+  - Confirms pairwise patristic distances match between DendroPy-extracted subtree and BioPython distance evaluation.
+- `test_triplet_collapse_consistency_dendropy_vs_biopython`
+  - Confirms DendroPy triplet extraction is numerically consistent with an independent BioPython prune/collapse path for all three pairwise distances in each triplet.
 
-- test_generate_triplets_outgroup_comma_separated_with_spaces
-	- Inputs: taxa list + comma-separated with whitespace
-	- Output: each triplet excludes OutGroup1 and OutGroup2
-	- Purpose: whitespace-tolerant parsing.
+## Triplet Processing Pipeline (`tests/test_triplet_processor.py`)
 
-- test_read_triplet_filter_file_parses_valid_and_skips_invalid
-	- Inputs: triplets.txt with lines "TaxaA,TaxaB,TaxaC" and "TaxaA,TaxaB"
-	- Output: triplets == [("TaxaA", "TaxaB", "TaxaC")] and invalid_lines == [(2, "TaxaA,TaxaB")]
-	- Purpose: validate parsing and invalid line capture.
+- `test_compute_tree_height_statistic_matches_definition`
+- `test_classify_triplet_topology_string_for_all_three_topologies`
+- `test_pearson_discordant_chi_square_balanced_counts_not_significant`
+- `test_two_proportion_discordant_z_test_balanced_counts_not_significant`
+- `test_custom_chi_square_matches_scipy_reference_randomized`
+- `test_custom_ks_matches_scipy_asymptotic_reference_randomized`
+- `test_run_triplet_pipeline_no_introgression_when_dct_not_significant`
+- `test_run_triplet_pipeline_inflow_when_ks_not_significant`
+- `test_run_triplet_pipeline_outflow_when_con_summary_higher`
+- `test_run_triplet_pipeline_ghost_when_dis_summary_higher`
+- `test_parse_analyze_and_write_pipeline_roundtrip_with_species_header`
 
-- test_filter_triplets_by_taxa_skips_missing_taxa
-	- Inputs: triplets [(TaxaA, TaxaB, TaxaC), (TaxaA, TaxaB, TaxaX)] and taxa_set {TaxaA, TaxaB, TaxaC}
-	- Output: kept == [("TaxaA", "TaxaB", "TaxaC")] and skipped == [(("TaxaA", "TaxaB", "TaxaX"), ["TaxaX"]) ]
-	- Purpose: skip triplets with missing taxa.
-
-- test_write_triplets_to_file
-	- Inputs: triplets [(TaxaA, TaxaB, TaxaC), (TaxaA, TaxaB, TaxaD)]
-	- Output: content == ["TaxaA,TaxaB,TaxaC", "TaxaA,TaxaB,TaxaD"]
-	- Purpose: write triplet list file.
-
-- test_extract_triplet_subtree_missing_taxa
-	- Inputs: tree with taxa (TaxaA, TaxaB, TaxaC), triplet (TaxaA, TaxaB, TaxaX)
-	- Output: subtree is None
-	- Purpose: missing taxa handling.
-
-- test_process_gene_trees_for_triplets
-	- Inputs: three gene trees, three triplets
-	- Output: len(mapping) == 3 and each triplet has 1 tree
-	- Purpose: extraction pipeline.
-
-- test_write_triplet_gene_trees_streaming
-	- Inputs: triplets + gene file
-	- Output: output exists; total_subtrees > 0; triplets_with_trees > 0; content includes "TaxaA,TaxaB,TaxaC"
-	- Purpose: streaming writer.
-
-- test_write_triplet_gene_trees_multiprocess_triplets_single_worker
-	- Inputs: triplets + gene file
-	- Output: worker_count == 1, output exists, total_subtrees > 0, triplets_with_trees > 0
-	- Purpose: triplet-parallel single worker.
-
-- test_write_triplet_gene_trees_multiprocess_accepts_list
-	- Inputs: triplets + in-memory gene list
-	- Output: worker_count == 1, output exists, total_subtrees > 0, triplets_with_trees > 0, and no chunk dirs remain
-	- Purpose: list input handling.
-
-- test_write_triplet_gene_trees_separator
-	- Inputs: triplet mapping
-	- Output: content includes "=" * 60
-	- Purpose: output formatting.
-
-- test_format_newick_with_precision_triplet_parser
-	- Inputs: tree
-	- Output: newick endswith ";"
-	- Purpose: format output.
-
-## Triplet Equivalence (tests/test_tree_parser.py)
-
-- test_triplet_branch_lengths_match (parametrized)
-	- Inputs: triplet_comparison_cases, pairs (A,B), (A,C), (B,C)
-	- Output: bio_dist == approx(dendro_dist) for each case and pair
-	- Purpose: verify branch length equivalence between approaches.
-
-
-- test_root_tree_on_multiple_outgroups_prunes_outgroup_clade
-	- Inputs: tree + outgroups
-	- Output: missing == set(), pruned_tree is not None, excluded has Tanypteryx and Pantala, ingroup has Anax_walsinghami and not Tanypteryx
-	- Purpose: MRCA pruning.
-
-- test_write_triplet_gene_trees_streaming
-	- Inputs: triplets + gene file
-	- Output: output exists; total_subtrees > 0; triplets_with_trees > 0; content includes "TaxaA,TaxaB,TaxaC"
-	- Purpose: streaming writer.
-
-- test_write_triplet_gene_trees_multiprocess_triplets_single_worker
-	- Inputs: triplets + gene file
-	- Output: worker_count == 1, output exists, total_subtrees > 0, triplets_with_trees > 0
-	- Purpose: triplet-parallel single worker.
-
-- test_write_triplet_gene_trees_multiprocess_accepts_list
-	- Inputs: triplets + in-memory gene list
-	- Output: worker_count == 1, output exists, total_subtrees > 0, triplets_with_trees > 0, and no chunk dirs remain
-	- Purpose: list input handling.
-
-- test_write_triplet_gene_trees_separator
-	- Inputs: triplet mapping
-	- Output: content includes "=" * 60
-	- Purpose: output formatting.
-
-- test_clean_and_save_trees
-	- Inputs: species tree
-	- Output: output exists, len(cleaned) == 1, dropped == {}
-	- Purpose: cleaning pipeline.
-
-- test_clean_and_save_gene_trees_discards_missing_outgroup
-	- Inputs: gene trees (one missing outgroup)
-	- Output: len(cleaned) == 1, missing_indices == [2], rooted_count == 1
-	- Purpose: discard gene trees without outgroup.
-
-- test_format_newick_with_precision
-	- Inputs: tree
-	- Output: newick endswith ";"
-	- Purpose: format output.
-
-## Triplet Processing Pipeline (tests/test_triplet_processor.py)
-
-- test_compute_tree_height_statistic_matches_definition
-	- Inputs: rooted triplet tree with known branch lengths
-	- Output: `H(T)` equals average root-to-tip distance
-	- Purpose: validate corrected tree-height computation.
-
-- test_classify_triplet_topology_for_all_three_topologies
-	- Inputs: rooted trees for `con`, `dis1`, and `dis2`
-	- Output: correct topology labels for species triplet `(A,B,C)`
-	- Purpose: verify topology classification.
-
-- test_pearson_discordant_chi_square_balanced_counts_not_significant
-	- Inputs: equal discordant counts
-	- Output: `z=0`, `p=1`
-	- Purpose: validate DCT baseline behavior.
-
-- test_run_triplet_pipeline_no_introgression_when_dct_not_significant
-	- Inputs: balanced discordant trees
-	- Output: `classification == no_introgression`
-	- Purpose: verify early stop after DCT.
-
-- test_run_triplet_pipeline_inflow_when_ks_not_significant
-	- Inputs: significant DCT with similar `H(T)` distributions
-	- Output: `classification == inflow_introgression`
-	- Purpose: verify THT non-significant branch.
-
-- test_run_triplet_pipeline_outflow_when_con_median_higher
-	- Inputs: significant DCT and KS, with `median(H_con) > median(H_dis)`
-	- Output: `classification == outflow_introgression`
-	- Purpose: verify outflow decision rule.
-
-- test_run_triplet_pipeline_ghost_when_dis_median_higher
-	- Inputs: significant DCT and KS, with `median(H_con) < median(H_dis)`
-	- Output: `classification == ghost_introgression`
-	- Purpose: verify ghost decision rule.
-
-- test_parse_analyze_and_write_pipeline_roundtrip
-	- Inputs: small `unique_triplets_gene_trees.txt` fixture
-	- Output: parse + analyze + write TSV succeed with expected fields
-	- Purpose: validate file-oriented pipeline workflow.
+These tests cover topology classification, discordant-count statistics, KS behavior, and final introgression classification outputs.
 
 ## Runtime Argument Resolution and Process Defaults
 
 ### Orchestrator (`tests/test_orchestrator.py`)
 
 - `test_resolve_runtime_args_cli_custom_processes_preserved`
-	- Inputs: CLI mode with `processes=5`
-	- Output: `resolved.processes == 5`
-	- Purpose: CLI-provided process count is preserved when config mode is not used.
-
 - `test_resolve_runtime_args_config_processes_preserved_when_set`
-	- Inputs: config mode with `"processes": 4`
-	- Output: `resolved.processes == 4`
-	- Purpose: config-provided process count is preserved.
-
 - `test_resolve_runtime_args_config_with_cli_warns_and_ignores`
-	- Inputs: config mode where config omits `processes` and CLI passes non-default `processes`
-	- Output: `resolved.processes == 0`
-	- Purpose: config-mode default (`0`) is used when `processes` is omitted in config.
 
 ### Tree Parser (`tests/test_tree_parser.py`)
 
 - `test_resolve_runtime_args_tree_parser_cli_custom_processes_preserved`
-	- Inputs: CLI mode with `processes=6`
-	- Output: `resolved.processes == 6`
-	- Purpose: CLI-provided process count is preserved.
-
 - `test_resolve_runtime_args_tree_parser_config_warns_and_ignores`
-	- Inputs: config mode with `"processes": 3`
-	- Output: `resolved.processes == 3`
-	- Purpose: config-provided process count is preserved.
-
 - `test_resolve_runtime_args_tree_parser_config_defaults_processes_to_zero`
-	- Inputs: config mode without `processes`, CLI passes non-default `processes`
-	- Output: `resolved.processes == 0`
-	- Purpose: config-mode default (`0`) is used when key is omitted.
 
 ### Triplet Processor (`tests/test_triplet_processor.py`)
 
 - `test_resolve_runtime_args_triplet_processor_cli_custom_processes_preserved`
-	- Inputs: CLI mode with `processes=8`
-	- Output: `resolved.processes == 8`
-	- Purpose: CLI-provided process count is preserved.
-
 - `test_resolve_runtime_args_triplet_processor_config_processes_preserved_when_set`
-	- Inputs: config mode with `"processes": 3`
-	- Output: `resolved.processes == 3`
-	- Purpose: config-provided process count is preserved.
-
 - `test_resolve_runtime_args_triplet_processor_config_defaults_processes_to_zero`
-	- Inputs: config mode without `processes`, CLI passes non-default `processes`
-	- Output: `resolved.processes == 0`
-	- Purpose: config-mode default (`0`) is used when key is omitted.
 
-### Config Loaders (`tests/test_config.py`)
+### Config loaders (`tests/test_config.py`)
 
 - `test_load_orchestrator_config_defaults_processes_to_zero`
 - `test_load_tree_parser_config_defaults_processes_to_zero`
 - `test_load_triplet_processor_config_defaults_processes_to_zero`
-	- Inputs: valid config payloads with required fields and no `processes` key
-	- Output: parsed config has `processes == 0`
-	- Purpose: enforce process defaulting at config layer.
 
+These tests confirm omitted `processes` defaults to `0`, explicit values are preserved, and config mode precedence is enforced.
