@@ -59,6 +59,22 @@ def test_resolve_runtime_args_tree_parser_cli_defaults():
     assert resolved.min_support_value == 0.5
 
 
+def test_resolve_runtime_args_tree_parser_cli_custom_processes_preserved():
+    args = argparse.Namespace(
+        config_file=None,
+        species_tree="species.nwk",
+        gene_trees="genes.nwk",
+        outgroup="Out1,Out2",
+        triplet_filter=None,
+        output=None,
+        processes=6,
+        no_multiprocessing=False,
+    )
+
+    resolved = _resolve_runtime_args(args)
+    assert resolved.processes == 6
+
+
 def test_resolve_runtime_args_tree_parser_config_warns_and_ignores(tmp_path, capsys):
     config_path = tmp_path / "tree_parser_config.json"
     config_path.write_text(
@@ -95,6 +111,33 @@ def test_resolve_runtime_args_tree_parser_config_warns_and_ignores(tmp_path, cap
     assert resolved.processes == 3
     assert resolved.no_multiprocessing is True
     assert resolved.min_support_value == 0.7
+
+
+def test_resolve_runtime_args_tree_parser_config_defaults_processes_to_zero(tmp_path):
+    config_path = tmp_path / "tree_parser_config_default_processes.json"
+    config_path.write_text(
+        """
+{
+  "species_tree_path": "s.nwk",
+  "gene_trees_path": "g.nwk",
+  "outgroup": "OutA"
+}
+""".strip()
+    )
+
+    args = argparse.Namespace(
+        config_file=str(config_path),
+        species_tree=None,
+        gene_trees=None,
+        outgroup=None,
+        triplet_filter=None,
+        output=None,
+        processes=9,
+        no_multiprocessing=False,
+    )
+
+    resolved = _resolve_runtime_args(args)
+    assert resolved.processes == 0
 
 # ============================================================================
 # Fixtures
