@@ -140,7 +140,6 @@ def test_run_triplet_pipeline_uses_species_concordant_and_frequency_ranked_disco
         rng=random.Random(0),
     )
 
-    assert result.con_topology == TOPOLOGY_AB
     assert result.dis1_topology == TOPOLOGY_BC
     assert result.dis2_topology == TOPOLOGY_AC
     assert result.n_con == 8
@@ -164,6 +163,8 @@ def test_run_triplet_pipeline_supports_z_test_for_discordant_counts():
 
     assert result.dct_significant is True
     assert result.dct_p_value < 0.01
+    assert result.dct_z_score is not None
+    assert result.dct_chi_statistics is None
 
 
 def test_run_triplet_pipeline_supports_median_summary_statistic():
@@ -195,7 +196,6 @@ def test_run_triplet_pipeline_breaks_discordant_ties_by_first_topology():
         species_topology=TOPOLOGY_AB,
     )
 
-    assert result.con_topology == TOPOLOGY_AB
     assert result.dis1_topology == TOPOLOGY_BC
     assert result.dis2_topology == TOPOLOGY_AC
     assert result.n_dis1 == 3
@@ -242,7 +242,6 @@ def test_run_triplet_pipeline_outflow_when_con_summary_higher():
 
     assert result.classification == "outflow_introgression"
     assert result.ks_significant is True
-    assert result.con_topology == TOPOLOGY_AB
     assert result.most_frequent_matches_concordant is True
     assert result.summary_con > result.summary_dis
 
@@ -258,7 +257,6 @@ def test_run_triplet_pipeline_ghost_when_dis_summary_higher():
 
     assert result.classification == "ghost_introgression"
     assert result.ks_significant is True
-    assert result.con_topology == TOPOLOGY_AB
     assert result.most_frequent_matches_concordant is True
     assert result.summary_con < result.summary_dis
 
@@ -288,9 +286,10 @@ def test_parse_analyze_and_write_pipeline_roundtrip_with_species_header(tmp_path
     write_pipeline_results(results, str(output_file))
 
     out = output_file.read_text()
-    assert "con_topology" in out
     assert "species_tree" in out
     assert "most_frequent_matches_concordant" in out
+    assert "dct_chi_statistics" in out
+    assert "dct_z_score" in out
     assert "A,B,C" in out
 
 
@@ -399,8 +398,8 @@ def test_write_pipeline_results_includes_topology_columns(tmp_path):
     write_pipeline_results([result], str(output_file))
 
     out = output_file.read_text()
-    assert "con_topology" in out
     assert "dis1_topology" in out
+    assert "dis2_topology" in out
 
 
 def test_write_pipeline_results_marks_discordant_highest_freq(tmp_path):
@@ -425,12 +424,61 @@ def test_collect_triplet_statistics_returns_dict_list():
     assert isinstance(stats, list)
     assert len(stats) == 1
     assert stats[0]["triplet"] == species_triplet
-    assert stats[0]["abc_mapping"] == "A=A,B=B,C=C"
     assert "most_frequent_matches_concordant" in stats[0]
-    assert "topology_counts" in stats[0]
-    assert stats[0]["topology_counts"][TOPOLOGY_AB] == result.n_topology_ab
     assert "topology_frequency_ranking" in stats[0]
     assert "highest_freq_topologies" in stats[0]
+    assert "dct_chi_statistics" in stats[0]
+    assert "dct_z_score" in stats[0]
+
+
+def test_write_pipeline_results_uses_dct_chi_statistic_column_for_chi_square(tmp_path):
+    species_triplet = ("A", "B", "C")
+    trees = (["((B:1,C:1):1,A:1);"] * 12) + (["((A:1,B:1):1,C:1);"] * 8) + (["((A:1,C:1):1,B:1);"] * 2)
+    result = run_triplet_pipeline(
+        species_triplet,
+        trees,
+        species_topology=TOPOLOGY_AB,
+        discordant_test="chi-square",
+        rng=random.Random(10),
+    )
+
+    output_file = tmp_path / "results_chi.tsv"
+    write_pipeline_results([result], str(output_file))
+
+    lines = output_file.read_text().splitlines()
+    header = lines[0].split("\t")
+    row = lines[1].split("\t")
+
+    chi_idx = header.index("dct_chi_statistics")
+    z_idx = header.index("dct_z_score")
+
+    assert row[chi_idx] != ""
+    assert row[z_idx] == ""
+
+
+def test_write_pipeline_results_uses_dct_z_score_column_for_z_test(tmp_path):
+    species_triplet = ("A", "B", "C")
+    trees = (["((B:1,C:1):1,A:1);"] * 12) + (["((A:1,B:1):1,C:1);"] * 8) + (["((A:1,C:1):1,B:1);"] * 2)
+    result = run_triplet_pipeline(
+        species_triplet,
+        trees,
+        species_topology=TOPOLOGY_AB,
+        discordant_test="z-test",
+        rng=random.Random(11),
+    )
+
+    output_file = tmp_path / "results_z.tsv"
+    write_pipeline_results([result], str(output_file))
+
+    lines = output_file.read_text().splitlines()
+    header = lines[0].split("\t")
+    row = lines[1].split("\t")
+
+    chi_idx = header.index("dct_chi_statistics")
+    z_idx = header.index("dct_z_score")
+
+    assert row[chi_idx] == ""
+    assert row[z_idx] != ""
 
 
 def test_write_pipeline_statistics_json(tmp_path):
@@ -442,7 +490,8 @@ def test_write_pipeline_statistics_json(tmp_path):
     write_pipeline_statistics_json([result], str(output_file))
 
     out = output_file.read_text()
-    assert "topology_counts" in out
+    assert "dct_chi_statistics" in out
+    assert "dct_z_score" in out
     assert "classification" in out
 
 
