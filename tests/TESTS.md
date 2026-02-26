@@ -35,6 +35,29 @@ Then run:
 ```bash
 pytest --cov=ghostparser --cov-report=html
 ```
+
+### Run SciPy Reference Comparison Tests
+
+These tests are marked with `pytest.mark.reference` and validate custom statistical helpers against SciPy reference behavior.
+
+Run only reference tests:
+
+```bash
+pytest -m reference
+```
+
+Run all tests except reference tests:
+
+```bash
+pytest -m "not reference"
+```
+
+Current reference-marked tests in `tests/test_triplet_processor.py`:
+
+- `test_custom_chi_square_matches_scipy_reference_randomized`
+- `test_custom_ks_matches_scipy_asymptotic_reference_randomized`
+- `test_two_sample_ks_test_hybrid_uses_scipy_near_threshold`
+
 # Test Catalog
 
 This file summarizes inputs, outputs, and intent for each test function. Shared fixtures live in tests/fixtures.py.
