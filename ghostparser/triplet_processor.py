@@ -330,6 +330,32 @@ def _two_sample_ks_test_scipy(sample_a, sample_b):
     return float(result.statistic), float(result.pvalue)
 
 
+def two_sample_ks_test_hybrid(sample_a, sample_b, alpha=0.05, borderline_margin=0.01):
+    """Hybrid KS helper for future use (not used in active pipeline).
+
+    Strategy:
+    - Run custom KS first for speed.
+    - If p-value is close to decision boundary (``alpha``), recompute using
+      SciPy backup implementation.
+
+    Args:
+        sample_a: First sample.
+        sample_b: Second sample.
+        alpha: Decision threshold used to define the boundary neighborhood.
+        borderline_margin: Width of boundary neighborhood around ``alpha``.
+
+    Returns:
+        Tuple ``(D, p_value)``.
+    """
+    if borderline_margin < 0:
+        raise ValueError("borderline_margin must be >= 0")
+
+    d_stat, p_value = two_sample_ks_test(sample_a, sample_b)
+    if abs(p_value - alpha) <= borderline_margin:
+        return _two_sample_ks_test_scipy(sample_a, sample_b)
+    return d_stat, p_value
+
+
 def _median(values):
     """Compute median of numeric iterable."""
     if not values:
