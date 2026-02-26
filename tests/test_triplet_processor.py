@@ -468,6 +468,24 @@ def test_resolve_runtime_args_triplet_processor_cli_defaults():
     assert resolved.summary_statistic == "mean"
 
 
+def test_resolve_runtime_args_triplet_processor_cli_custom_processes_preserved():
+    args = argparse.Namespace(
+        config_file=None,
+        input="unique_triplets_gene_trees.txt",
+        output=None,
+        stats_output=None,
+        alpha_dct=0.01,
+        alpha_ks=0.05,
+        discordant_test="chi-square",
+        summary_statistic="mean",
+        processes=8,
+        no_multiprocessing=False,
+    )
+
+    resolved = _resolve_runtime_args(args)
+    assert resolved.processes == 8
+
+
 def test_resolve_runtime_args_triplet_processor_config_warns_and_ignores(tmp_path, capsys):
     config_path = tmp_path / "triplet_processor_config.json"
     config_path.write_text(
@@ -502,3 +520,58 @@ def test_resolve_runtime_args_triplet_processor_config_warns_and_ignores(tmp_pat
     assert resolved.output == "out.tsv"
     assert resolved.discordant_test == "z-test"
     assert resolved.summary_statistic == "median"
+
+
+def test_resolve_runtime_args_triplet_processor_config_processes_preserved_when_set(tmp_path):
+    config_path = tmp_path / "triplet_processor_with_processes.json"
+    config_path.write_text(
+        """
+{
+  "input_path": "input.tsv",
+  "processes": 3
+}
+""".strip()
+    )
+
+    args = argparse.Namespace(
+        config_file=str(config_path),
+        input=None,
+        output=None,
+        stats_output=None,
+        alpha_dct=0.01,
+        alpha_ks=0.05,
+        discordant_test="chi-square",
+        summary_statistic="mean",
+        processes=0,
+        no_multiprocessing=False,
+    )
+
+    resolved = _resolve_runtime_args(args)
+    assert resolved.processes == 3
+
+
+def test_resolve_runtime_args_triplet_processor_config_defaults_processes_to_zero(tmp_path):
+    config_path = tmp_path / "triplet_processor_default_processes.json"
+    config_path.write_text(
+        """
+{
+  "input_path": "input.tsv"
+}
+""".strip()
+    )
+
+    args = argparse.Namespace(
+        config_file=str(config_path),
+        input=None,
+        output=None,
+        stats_output=None,
+        alpha_dct=0.01,
+        alpha_ks=0.05,
+        discordant_test="chi-square",
+        summary_statistic="mean",
+        processes=11,
+        no_multiprocessing=False,
+    )
+
+    resolved = _resolve_runtime_args(args)
+    assert resolved.processes == 0
