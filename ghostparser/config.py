@@ -104,10 +104,9 @@ def load_orchestrator_config(config_file: str) -> dict:
             raise ConfigError("Config field triplet_filter must be a non-empty string when provided")
         triplet_filter = triplet_filter.strip()
 
-    processes = payload.get("processes")
-    if processes is not None:
-        if not isinstance(processes, int) or processes < 0:
-            raise ConfigError("Config field processes must be an integer >= 0")
+    processes = payload.get("processes", 0)
+    if not isinstance(processes, int) or processes < 0:
+        raise ConfigError("Config field processes must be an integer >= 0")
 
     min_support_value = payload.get("min_support_value")
     if min_support_value is not None:
@@ -192,10 +191,9 @@ def load_tree_parser_config(config_file: str) -> dict:
             raise ConfigError("Config field triplet_filter must be a non-empty string when provided")
         triplet_filter = triplet_filter.strip()
 
-    processes = payload.get("processes")
-    if processes is not None:
-        if not isinstance(processes, int) or processes < 0:
-            raise ConfigError("Config field processes must be an integer >= 0")
+    processes = payload.get("processes", 0)
+    if not isinstance(processes, int) or processes < 0:
+        raise ConfigError("Config field processes must be an integer >= 0")
 
     min_support_value = payload.get("min_support_value")
     if min_support_value is not None:
@@ -276,10 +274,9 @@ def load_triplet_processor_config(config_file: str) -> dict:
         if not isinstance(summary_statistic, str) or summary_statistic not in {"mean", "median"}:
             raise ConfigError("Config field summary_statistic must be one of: mean, median")
 
-    processes = payload.get("processes")
-    if processes is not None:
-        if not isinstance(processes, int) or processes < 0:
-            raise ConfigError("Config field processes must be an integer >= 0")
+    processes = payload.get("processes", 0)
+    if not isinstance(processes, int) or processes < 0:
+        raise ConfigError("Config field processes must be an integer >= 0")
 
     no_multiprocessing = payload.get("no_multiprocessing")
     if no_multiprocessing is not None and not isinstance(no_multiprocessing, bool):
