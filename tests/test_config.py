@@ -106,6 +106,22 @@ def test_load_orchestrator_config_invalid_summary_statistic(tmp_path):
         load_orchestrator_config(str(config_path))
 
 
+def test_load_orchestrator_config_defaults_processes_to_zero(tmp_path):
+    config_path = tmp_path / "config_default_processes.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "species_tree_path": "species.nwk",
+                "gene_trees_path": "genes.nwk",
+                "outgroup": "OutA",
+            }
+        )
+    )
+
+    config = load_orchestrator_config(str(config_path))
+    assert config["processes"] == 0
+
+
 def test_load_tree_parser_config_json(tmp_path):
     config_path = tmp_path / "tree_parser_config.json"
     config_path.write_text(
@@ -152,6 +168,22 @@ def test_load_tree_parser_config_invalid_no_multiprocessing(tmp_path):
         load_tree_parser_config(str(config_path))
 
 
+def test_load_tree_parser_config_defaults_processes_to_zero(tmp_path):
+    config_path = tmp_path / "tree_parser_default_processes.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "species_tree_path": "species.nwk",
+                "gene_trees_path": "genes.nwk",
+                "outgroup": "OutA",
+            }
+        )
+    )
+
+    config = load_tree_parser_config(str(config_path))
+    assert config["processes"] == 0
+
+
 def test_load_triplet_processor_config_json(tmp_path):
     config_path = tmp_path / "triplet_processor_config.json"
     config_path.write_text(
@@ -189,3 +221,11 @@ def test_load_triplet_processor_config_missing_input(tmp_path):
 
     with pytest.raises(ConfigError, match="input_path"):
         load_triplet_processor_config(str(config_path))
+
+
+def test_load_triplet_processor_config_defaults_processes_to_zero(tmp_path):
+    config_path = tmp_path / "triplet_processor_default_processes.json"
+    config_path.write_text(json.dumps({"input_path": "input.tsv"}))
+
+    config = load_triplet_processor_config(str(config_path))
+    assert config["processes"] == 0
