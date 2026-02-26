@@ -68,10 +68,6 @@ The final file is `orchestrator_triplet_results.tsv`.
   - Source: `row["triplet"]` from `TripletPipelineResult.to_dict()`.
   - Method: tuple `(A, B, C)` joined as `A,B,C`.
 
-- `abc_mapping`
-  - Source: `TripletPipelineResult.to_dict()`.
-  - Method: formatted as `A=<taxonA>,B=<taxonB>,C=<taxonC>` from the normalized triplet tuple.
-
 ### Topology Labels
 
 Canonical topology strings:
@@ -83,10 +79,6 @@ Canonical topology strings:
 - `species_tree`
   - Source: species-triplet subtree header passed into `run_triplet_pipeline`.
   - Method: exact extracted species-triplet Newick string for that triplet.
-
-- `con_topology`
-  - Source: `run_triplet_pipeline`.
-  - Method: topology that matches species tree for the triplet.
 
 - `dis1_topology`
   - Source: `run_triplet_pipeline`.
@@ -107,23 +99,10 @@ Canonical topology strings:
   - Source: `run_triplet_pipeline`.
   - Method: `True` when `n_con >= n_dis1` and `n_con >= n_dis2`; otherwise `False`.
 
-### Raw Topology Counts
-
-Each gene tree in the triplet section is classified with `classify_triplet_topology_string`.
-
-- `n_topology_ab`
-  - Method: count of gene trees classified as `((A,B),C)`.
-
-- `n_topology_bc`
-  - Method: count of gene trees classified as `((B,C),A)`.
-
-- `n_topology_ac`
-  - Method: count of gene trees classified as `((A,C),B)`.
-
 ### Inference Group Counts
 
 - `n_con`
-  - Method: count for species-matching `con_topology`.
+  - Method: count for species-matching topology.
 
 - `n_dis1`
   - Method: count for more frequent discordant topology.
@@ -132,6 +111,14 @@ Each gene tree in the triplet section is classified with `classify_triplet_topol
   - Method: count for less frequent discordant topology.
 
 ### DCT-like Test Outputs
+
+- `dct_chi_statistics`
+  - Method: populated with DCT statistic value only when `--discordant-test chi-square` is used.
+  - Otherwise left empty.
+
+- `dct_z_score`
+  - Method: populated with DCT statistic value only when `--discordant-test z-test` is used.
+  - Otherwise left empty.
 
 - `dct_p_value`
   - Method: configurable discordant test on (`n_dis1`, `n_dis2`):
@@ -192,18 +179,17 @@ Below is an example of how one row appears in `orchestrator_triplet_results.tsv`
 Header (truncated for readability):
 
 ```tsv
-triplet	abc_mapping	species_tree	con_topology	dis1_topology	dis2_topology	highest_freq_topologies	n_topology_ab	n_topology_bc	n_topology_ac	n_con	n_dis1	n_dis2	most_frequent_matches_concordant	dct_p_value	dct_significant	ks_statistic	ks_p_value	ks_significant	classification	analyzed_trees
+triplet	species_tree	dis1_topology	dis2_topology	highest_freq_topologies	n_con	n_dis1	n_dis2	most_frequent_matches_concordant	dct_chi_statistics	dct_z_score	dct_p_value	dct_significant	ks_statistic	ks_p_value	ks_significant	classification	analyzed_trees
 ```
 
 Example data row:
 
 ```tsv
-TaxaA,TaxaB,TaxaC	A=TaxaA,B=TaxaB,C=TaxaC	((TaxaA:1,TaxaB:1):1,TaxaC:1);	((A,B),C)	((B,C),A)	((A,C),B)	((B,C),A)	8	12	4	8	12	4	False	0.001	True	0.2	0.07	False	inflow_introgression	24
+TaxaA,TaxaB,TaxaC	((TaxaA:1,TaxaB:1):1,TaxaC:1);	((B,C),A)	((A,C),B)	((B,C),A)	8	12	4	False	8		0.001	True	0.2	0.07	False	inflow_introgression	24
 ```
 
 How to read this example quickly:
 
-- `abc_mapping` shows exactly which taxa are A/B/C in all topology labels.
 - `most_frequent_matches_concordant=False` because a discordant topology frequency is higher than concordant frequency.
 - `classification = inflow_introgression` because DCT is significant, but KS is not significant.
 
