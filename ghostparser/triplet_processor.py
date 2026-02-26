@@ -54,7 +54,6 @@ class TripletPipelineResult:
     triplet: tuple[str, str, str]
     species_tree: str | None
     species_topology: str
-    con_topology: str
     dis1_topology: str
     dis2_topology: str
     top1_topology: str
@@ -62,12 +61,11 @@ class TripletPipelineResult:
     top3_topology: str
     highest_freq_topologies: tuple[str, ...]
     most_frequent_matches_concordant: bool
-    n_topology_ab: int
-    n_topology_bc: int
-    n_topology_ac: int
     n_con: int
     n_dis1: int
     n_dis2: int
+    dct_chi_statistics: float | None
+    dct_z_score: float | None
     dct_p_value: float
     dct_significant: bool
     ks_p_value: float | None
@@ -81,27 +79,19 @@ class TripletPipelineResult:
 
     def to_dict(self):
         """Serialize all relevant triplet statistics to a dictionary."""
-        a_taxon, b_taxon, c_taxon = self.triplet
-        abc_mapping = f"A={a_taxon},B={b_taxon},C={c_taxon}"
-
         return {
             "triplet": self.triplet,
-            "abc_mapping": abc_mapping,
             "species_tree": self.species_tree,
-            "con_topology": self.con_topology,
             "dis1_topology": self.dis1_topology,
             "dis2_topology": self.dis2_topology,
             "topology_frequency_ranking": [self.top1_topology, self.top2_topology, self.top3_topology],
             "highest_freq_topologies": list(self.highest_freq_topologies),
             "most_frequent_matches_concordant": self.most_frequent_matches_concordant,
-            "topology_counts": {
-                TOPOLOGY_AB: self.n_topology_ab,
-                TOPOLOGY_BC: self.n_topology_bc,
-                TOPOLOGY_AC: self.n_topology_ac,
-            },
             "n_con": self.n_con,
             "n_dis1": self.n_dis1,
             "n_dis2": self.n_dis2,
+            "dct_chi_statistics": self.dct_chi_statistics,
+            "dct_z_score": self.dct_z_score,
             "dct_p_value": self.dct_p_value,
             "dct_significant": self.dct_significant,
             "ks_statistic": self.ks_statistic,
@@ -449,15 +439,16 @@ def _run_triplet_pipeline_from_observations(
             f"Choose one of: {', '.join(SUMMARY_STATISTIC_CHOICES)}"
         )
 
-    _, dct_p_value = run_discordant_count_test(n_dis1, n_dis2, method=discordant_test)
+    dct_statistic, dct_p_value = run_discordant_count_test(n_dis1, n_dis2, method=discordant_test)
     dct_significant = dct_p_value <= alpha_dct
+    dct_chi_statistics = dct_statistic if discordant_test == "chi-square" else None
+    dct_z_score = dct_statistic if discordant_test == "z-test" else None
 
     if not dct_significant:
         return TripletPipelineResult(
             triplet=species_triplet,
             species_tree=species_tree_newick,
             species_topology=species_topology,
-            con_topology=con_topology,
             dis1_topology=dis1_topology,
             dis2_topology=dis2_topology,
             top1_topology=top1_topology,
@@ -465,12 +456,11 @@ def _run_triplet_pipeline_from_observations(
             top3_topology=top3_topology,
             highest_freq_topologies=highest_freq_topologies,
             most_frequent_matches_concordant=most_frequent_matches_concordant,
-            n_topology_ab=topology_counts[TOPOLOGY_AB],
-            n_topology_bc=topology_counts[TOPOLOGY_BC],
-            n_topology_ac=topology_counts[TOPOLOGY_AC],
             n_con=n_con,
             n_dis1=n_dis1,
             n_dis2=n_dis2,
+            dct_chi_statistics=dct_chi_statistics,
+            dct_z_score=dct_z_score,
             dct_p_value=dct_p_value,
             dct_significant=False,
             ks_p_value=None,
@@ -491,7 +481,6 @@ def _run_triplet_pipeline_from_observations(
             triplet=species_triplet,
             species_tree=species_tree_newick,
             species_topology=species_topology,
-            con_topology=con_topology,
             dis1_topology=dis1_topology,
             dis2_topology=dis2_topology,
             top1_topology=top1_topology,
@@ -499,12 +488,11 @@ def _run_triplet_pipeline_from_observations(
             top3_topology=top3_topology,
             highest_freq_topologies=highest_freq_topologies,
             most_frequent_matches_concordant=most_frequent_matches_concordant,
-            n_topology_ab=topology_counts[TOPOLOGY_AB],
-            n_topology_bc=topology_counts[TOPOLOGY_BC],
-            n_topology_ac=topology_counts[TOPOLOGY_AC],
             n_con=n_con,
             n_dis1=n_dis1,
             n_dis2=n_dis2,
+            dct_chi_statistics=dct_chi_statistics,
+            dct_z_score=dct_z_score,
             dct_p_value=dct_p_value,
             dct_significant=True,
             ks_p_value=ks_p_value,
@@ -537,7 +525,6 @@ def _run_triplet_pipeline_from_observations(
         triplet=species_triplet,
         species_tree=species_tree_newick,
         species_topology=species_topology,
-        con_topology=con_topology,
         dis1_topology=dis1_topology,
         dis2_topology=dis2_topology,
         top1_topology=top1_topology,
@@ -545,12 +532,11 @@ def _run_triplet_pipeline_from_observations(
         top3_topology=top3_topology,
         highest_freq_topologies=highest_freq_topologies,
         most_frequent_matches_concordant=most_frequent_matches_concordant,
-        n_topology_ab=topology_counts[TOPOLOGY_AB],
-        n_topology_bc=topology_counts[TOPOLOGY_BC],
-        n_topology_ac=topology_counts[TOPOLOGY_AC],
         n_con=n_con,
         n_dis1=n_dis1,
         n_dis2=n_dis2,
+        dct_chi_statistics=dct_chi_statistics,
+        dct_z_score=dct_z_score,
         dct_p_value=dct_p_value,
         dct_significant=True,
         ks_p_value=ks_p_value,
@@ -778,19 +764,16 @@ def write_pipeline_results(results, output_filepath):
     """Write pipeline results to TSV file."""
     header = [
         "triplet",
-        "abc_mapping",
         "species_tree",
-        "con_topology",
         "dis1_topology",
         "dis2_topology",
         "highest_freq_topologies",
-        "n_topology_ab",
-        "n_topology_bc",
-        "n_topology_ac",
         "n_con",
         "n_dis1",
         "n_dis2",
         "most_frequent_matches_concordant",
+        "dct_chi_statistics",
+        "dct_z_score",
         "dct_p_value",
         "dct_significant",
         "ks_statistic",
@@ -808,19 +791,16 @@ def write_pipeline_results(results, output_filepath):
         for result in results:
             row = [
                 ",".join(result.triplet),
-                f"A={result.triplet[0]},B={result.triplet[1]},C={result.triplet[2]}",
                 "" if result.species_tree is None else result.species_tree,
-                result.con_topology,
                 result.dis1_topology,
                 result.dis2_topology,
                 ",".join(result.highest_freq_topologies),
-                str(result.n_topology_ab),
-                str(result.n_topology_bc),
-                str(result.n_topology_ac),
                 str(result.n_con),
                 str(result.n_dis1),
                 str(result.n_dis2),
                 str(result.most_frequent_matches_concordant),
+                "" if result.dct_chi_statistics is None else f"{result.dct_chi_statistics:.12g}",
+                "" if result.dct_z_score is None else f"{result.dct_z_score:.12g}",
                 f"{result.dct_p_value:.12g}",
                 str(result.dct_significant),
                 "" if result.ks_statistic is None else f"{result.ks_statistic:.12g}",
