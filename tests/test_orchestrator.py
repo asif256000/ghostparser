@@ -58,6 +58,22 @@ def test_resolve_runtime_args_cli_defaults(tmp_path, monkeypatch):
     assert resolved.alpha_ks == 0.05
 
 
+def test_resolve_runtime_args_cli_custom_processes_preserved(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    args = argparse.Namespace(
+        config_file=None,
+        species_tree="species.nwk",
+        gene_trees="genes.nwk",
+        outgroup="Out1,Out2",
+        triplet_filter=None,
+        output=str(tmp_path / "results"),
+        processes=5,
+    )
+
+    resolved = _resolve_runtime_args(args)
+    assert resolved.processes == 5
+
+
 def test_resolve_runtime_args_config_with_cli_warns_and_ignores(tmp_path, capsys):
     config_path = tmp_path / "run_config.json"
     config_path.write_text(
@@ -71,7 +87,7 @@ def test_resolve_runtime_args_config_with_cli_warns_and_ignores(tmp_path, capsys
         outgroup=None,
         triplet_filter=None,
         output=str(tmp_path / "results"),
-        processes=0,
+        processes=7,
     )
 
     resolved = _resolve_runtime_args(args)
@@ -81,7 +97,28 @@ def test_resolve_runtime_args_config_with_cli_warns_and_ignores(tmp_path, capsys
     assert resolved.species_tree == "s.nwk"
     assert resolved.gene_trees == "g.nwk"
     assert resolved.outgroup == ["OutA"]
+    assert resolved.processes == 0
     assert resolved.discordant_test == "chi-square"
     assert resolved.summary_statistic == "mean"
     assert resolved.alpha_dct == 0.01
     assert resolved.alpha_ks == 0.05
+
+
+def test_resolve_runtime_args_config_processes_preserved_when_set(tmp_path):
+    config_path = tmp_path / "run_config_with_processes.json"
+    config_path.write_text(
+        '{"species_tree_path":"s.nwk","gene_trees_path":"g.nwk","outgroup":"OutA","processes":4}'
+    )
+
+    args = argparse.Namespace(
+        config_file=str(config_path),
+        species_tree=None,
+        gene_trees=None,
+        outgroup=None,
+        triplet_filter=None,
+        output=str(tmp_path / "results"),
+        processes=0,
+    )
+
+    resolved = _resolve_runtime_args(args)
+    assert resolved.processes == 4
