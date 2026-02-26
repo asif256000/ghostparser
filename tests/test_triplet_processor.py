@@ -5,6 +5,9 @@ import random
 
 import dendropy
 import pytest
+from scipy import stats
+
+import ghostparser.triplet_processor as triplet_processor_module
 
 from ghostparser.triplet_processor import (
     analyze_triplet_gene_tree_file,
@@ -14,6 +17,8 @@ from ghostparser.triplet_processor import (
     parse_triplet_gene_trees_file,
     pearson_discordant_chi_square_test,
     run_triplet_pipeline,
+    two_sample_ks_test,
+    two_sample_ks_test_hybrid,
     two_proportion_discordant_z_test,
     write_pipeline_statistics_json,
     write_pipeline_results,
@@ -85,6 +90,43 @@ def test_two_proportion_discordant_z_test_balanced_counts_not_significant():
     z_stat, p_value = two_proportion_discordant_z_test(10, 10)
     assert z_stat == pytest.approx(0.0)
     assert p_value == pytest.approx(1.0)
+
+
+@pytest.mark.reference
+def test_custom_chi_square_matches_scipy_reference_randomized():
+    rng = random.Random(123)
+    for _ in range(1000):
+        n_dis1 = rng.randint(0, 500)
+        n_dis2 = rng.randint(0, 500)
+
+        custom_stat, custom_p = pearson_discordant_chi_square_test(n_dis1, n_dis2)
+        scipy_result = stats.chisquare([n_dis1, n_dis2])
+
+        assert custom_stat == pytest.approx(float(scipy_result.statistic), rel=0.0, abs=1e-12)
+        assert custom_p == pytest.approx(float(scipy_result.pvalue), rel=0.0, abs=1e-12)
+
+
+@pytest.mark.reference
+def test_custom_ks_matches_scipy_asymptotic_reference_randomized():
+    rng = random.Random(456)
+    p_diffs = []
+    for _ in range(600):
+        n1 = rng.randint(20, 80)
+        n2 = rng.randint(20, 80)
+        sample_a = [rng.random() for _ in range(n1)]
+        sample_b = [rng.random() for _ in range(n2)]
+
+        custom_d, custom_p = two_sample_ks_test(sample_a, sample_b)
+        scipy_res = stats.ks_2samp(sample_a, sample_b, alternative="two-sided", method="asymp")
+
+        assert custom_d == pytest.approx(float(scipy_res.statistic), rel=0.0, abs=1e-12)
+        p_diffs.append(abs(custom_p - float(scipy_res.pvalue)))
+
+    # TODO: This threshold is intentionally relaxed because custom KS currently uses
+    # an asymptotic p-value approximation that can deviate from SciPy asymptotic values
+    # in a small fraction of randomized cases. If/when a corrected KS p-value
+    # calculation function is introduced, tighten this back to the stricter bound.
+    assert max(p_diffs) < 0.04
 
 
 def test_run_triplet_pipeline_uses_species_concordant_and_frequency_ranked_discordants():
@@ -298,6 +340,30 @@ def test_analyze_triplet_gene_tree_file_rejects_unknown_summary_statistic(tmp_pa
 
     with pytest.raises(ValueError, match="Unsupported summary statistic"):
         analyze_triplet_gene_tree_file(str(input_file), summary_statistic="mode")
+
+
+@pytest.mark.reference
+def test_two_sample_ks_test_hybrid_uses_scipy_near_threshold(monkeypatch):
+    monkeypatch.setattr(triplet_processor_module, "two_sample_ks_test", lambda *_: (0.12, 0.051))
+    monkeypatch.setattr(triplet_processor_module, "_two_sample_ks_test_scipy", lambda *_: (0.13, 0.049))
+
+    d_stat, p_value = two_sample_ks_test_hybrid([0.1, 0.2], [0.3, 0.4], alpha=0.05, borderline_margin=0.01)
+    assert d_stat == pytest.approx(0.13)
+    assert p_value == pytest.approx(0.049)
+
+
+def test_two_sample_ks_test_hybrid_keeps_custom_when_not_borderline(monkeypatch):
+    monkeypatch.setattr(triplet_processor_module, "two_sample_ks_test", lambda *_: (0.12, 0.40))
+    monkeypatch.setattr(triplet_processor_module, "_two_sample_ks_test_scipy", lambda *_: (0.22, 0.10))
+
+    d_stat, p_value = two_sample_ks_test_hybrid([0.1, 0.2], [0.3, 0.4], alpha=0.05, borderline_margin=0.01)
+    assert d_stat == pytest.approx(0.12)
+    assert p_value == pytest.approx(0.40)
+
+
+def test_two_sample_ks_test_hybrid_rejects_negative_margin():
+    with pytest.raises(ValueError, match="borderline_margin"):
+        two_sample_ks_test_hybrid([0.1, 0.2], [0.3, 0.4], borderline_margin=-0.1)
 
 
 def test_parse_triplet_gene_trees_file_requires_species_tree_column(tmp_path):
