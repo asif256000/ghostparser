@@ -231,13 +231,3 @@ pytest
 ```
 
 See [tests/TESTS.md](tests/TESTS.md) for detailed test documentation.
-
-## Development
-
-Set up a development environment:
-
-```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
