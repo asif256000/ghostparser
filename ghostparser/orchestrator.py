@@ -38,16 +38,20 @@ from .triplet_processor import (
     analyze_triplet_gene_tree_file,
     write_pipeline_results,
 )
-from .config import ConfigError, load_orchestrator_config
-
-
-DEFAULT_OUTPUT_FOLDER = "results"
-DEFAULT_PROCESSES = 0
-DEFAULT_MIN_SUPPORT_VALUE = 0.5
-DEFAULT_DISCORDANT_TEST = "chi-square"
-DEFAULT_SUMMARY_STATISTIC = "mean"
-DEFAULT_ALPHA_DCT = 0.01
-DEFAULT_ALPHA_KS = 0.05
+from .config import (
+    ConfigError,
+    DEFAULT_ALPHA_DCT,
+    DEFAULT_ALPHA_KS,
+    DEFAULT_DISCORDANT_TEST,
+    DEFAULT_MIN_SUPPORT_VALUE,
+    DEFAULT_OUTPUT_FOLDER,
+    DEFAULT_PROCESSES,
+    DEFAULT_STATS_BACKEND,
+    DEFAULT_SUMMARY_STATISTIC,
+    STATS_BACKEND_CHOICES,
+    load_orchestrator_config,
+    normalize_orchestrator_payload,
+)
 
 
 def _default_output_path():
@@ -90,7 +94,7 @@ def _build_argument_parser():
         "-o",
         "--output",
         type=str,
-        default=_default_output_path(),
+        default=None,
         help=f"Output folder (default: ./{DEFAULT_OUTPUT_FOLDER})",
     )
     parser.add_argument(
@@ -99,6 +103,42 @@ def _build_argument_parser():
         type=int,
         default=DEFAULT_PROCESSES,
         help="Number of worker processes for triplet extraction/processing (0 = all cores)",
+    )
+    parser.add_argument(
+        "--min-support-value",
+        type=float,
+        default=None,
+        help=f"Support threshold for tree cleaning (default: {DEFAULT_MIN_SUPPORT_VALUE})",
+    )
+    parser.add_argument(
+        "--discordant-test",
+        choices=("chi-square", "z-test"),
+        default=None,
+        help=f"Discordant count test (default: {DEFAULT_DISCORDANT_TEST})",
+    )
+    parser.add_argument(
+        "--summary-statistic",
+        choices=("mean", "median"),
+        default=None,
+        help=f"Summary statistic after KS test (default: {DEFAULT_SUMMARY_STATISTIC})",
+    )
+    parser.add_argument(
+        "--stats-backend",
+        choices=STATS_BACKEND_CHOICES,
+        default=None,
+        help=f"Statistical backend for DCT/KS (default: {DEFAULT_STATS_BACKEND})",
+    )
+    parser.add_argument(
+        "--alpha-dct",
+        type=float,
+        default=None,
+        help=f"DCT significance threshold (default: {DEFAULT_ALPHA_DCT})",
+    )
+    parser.add_argument(
+        "--alpha-ks",
+        type=float,
+        default=None,
+        help=f"KS significance threshold (default: {DEFAULT_ALPHA_KS})",
     )
     return parser
 
@@ -114,10 +154,22 @@ def _cli_args_used_alongside_config(args):
         provided.append("--outgroup")
     if args.triplet_filter is not None:
         provided.append("--triplet-filter")
-    if args.output != _default_output_path():
+    if args.output is not None:
         provided.append("--output")
     if args.processes != DEFAULT_PROCESSES:
         provided.append("--processes")
+    if args.min_support_value is not None:
+        provided.append("--min-support-value")
+    if args.discordant_test is not None:
+        provided.append("--discordant-test")
+    if args.summary_statistic is not None:
+        provided.append("--summary-statistic")
+    if args.stats_backend is not None:
+        provided.append("--stats-backend")
+    if args.alpha_dct is not None:
+        provided.append("--alpha-dct")
+    if args.alpha_ks is not None:
+        provided.append("--alpha-ks")
     return provided
 
 
@@ -132,47 +184,24 @@ def _resolve_runtime_args(args):
             )
 
         config = load_orchestrator_config(args.config_file)
-        return argparse.Namespace(
-            species_tree=config["species_tree"],
-            gene_trees=config["gene_trees"],
-            outgroup=config["outgroup"],
-            triplet_filter=config.get("triplet_filter"),
-            output=config.get("output") or _default_output_path(),
-            processes=config.get("processes", DEFAULT_PROCESSES),
-            min_support_value=config.get("min_support_value"),
-            discordant_test=config.get("discordant_test") or DEFAULT_DISCORDANT_TEST,
-            summary_statistic=config.get("summary_statistic") or DEFAULT_SUMMARY_STATISTIC,
-            alpha_dct=(
-                config.get("alpha_dct")
-                if config.get("alpha_dct") is not None
-                else DEFAULT_ALPHA_DCT
-            ),
-            alpha_ks=(
-                config.get("alpha_ks")
-                if config.get("alpha_ks") is not None
-                else DEFAULT_ALPHA_KS
-            ),
-        )
+        return argparse.Namespace(**config)
 
-    if not args.species_tree or not args.gene_trees or not args.outgroup:
-        raise ValueError(
-            "Missing required CLI arguments. Provide --species_tree, --gene_trees, and --outgroup, "
-            "or use --config-file."
-        )
-
-    return argparse.Namespace(
-        species_tree=args.species_tree,
-        gene_trees=args.gene_trees,
-        outgroup=args.outgroup,
-        triplet_filter=args.triplet_filter,
-        output=args.output,
-        processes=args.processes,
-        min_support_value=None,
-        discordant_test=DEFAULT_DISCORDANT_TEST,
-        summary_statistic=DEFAULT_SUMMARY_STATISTIC,
-        alpha_dct=DEFAULT_ALPHA_DCT,
-        alpha_ks=DEFAULT_ALPHA_KS,
-    )
+    payload = {
+        "species_tree_path": args.species_tree,
+        "gene_trees_path": args.gene_trees,
+        "outgroup": args.outgroup,
+        "triplet_filter": args.triplet_filter,
+        "output_folder": args.output,
+        "processes": args.processes,
+        "min_support_value": args.min_support_value,
+        "discordant_test": args.discordant_test,
+        "summary_statistic": args.summary_statistic,
+        "stats_backend": args.stats_backend,
+        "alpha_dct": args.alpha_dct,
+        "alpha_ks": args.alpha_ks,
+    }
+    config = normalize_orchestrator_payload(payload)
+    return argparse.Namespace(**config)
 
 
 def main():
@@ -211,6 +240,7 @@ def main():
         metrics.log(f"Outgroup: {', '.join(outgroup_taxa)}")
         metrics.log(f"Discordant count test: {args.discordant_test}")
         metrics.log(f"Summary statistic after KS: {args.summary_statistic}")
+        metrics.log(f"Statistical backend: {args.stats_backend}")
         metrics.log(f"DCT alpha: {args.alpha_dct}")
         metrics.log(f"KS alpha: {args.alpha_ks}")
         support_threshold = (
@@ -353,6 +383,7 @@ def main():
                 alpha_ks=args.alpha_ks,
                 discordant_test=args.discordant_test,
                 summary_statistic=args.summary_statistic,
+                stats_backend=args.stats_backend,
                 use_multiprocessing=use_multiprocessing,
                 processes=processes,
             )
