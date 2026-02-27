@@ -53,14 +53,14 @@ Returns:
 
 - `(label, most_frequent_matches_concordant)` where `most_frequent_matches_concordant` is `True` when concordant count is not lower than either discordant count.
 
-### `run_triplet_pipeline(species_triplet, triplet_gene_trees, alpha_dct=0.01, alpha_ks=0.05, discordant_test='z-test', summary_statistic='median', stats_backend='custom')`
+### `run_triplet_pipeline(species_triplet, triplet_gene_trees, alpha_dct=0.01, alpha_ks=0.05, discordant_test='chi-square', summary_statistic='median', stats_backend='standard')`
 
 Runs full sequential GhostParser logic and returns counts, p-values, selected summary statistics (`summary_con`, `summary_dis` fields), and final classification.
 
 Discordant test options:
 
-- `z-test` (default): two-proportion z-test (manual in `custom` backend; `statsmodels.stats.proportion.proportions_ztest` in `standard` backend)
-- `chi-square`: custom implementation in `custom` backend, `scipy.stats.chisquare` in `standard` backend
+- `chi-square` (default): custom implementation in `custom` backend, `scipy.stats.chisquare` in `standard` backend
+- `z-test`: two-proportion z-test (manual in `custom` backend; `statsmodels.stats.proportion.proportions_ztest` in `standard` backend)
 
 Summary statistic options after KS test:
 
@@ -69,8 +69,8 @@ Summary statistic options after KS test:
 
 Statistical backend options:
 
-- `custom` (default): uses GhostParser manual chi-square, two-proportion z-test, and KS implementations
-- `standard`: uses SciPy reference implementations for chi-square and KS, and statsmodels for two-proportion z-test
+- `standard` (default): uses SciPy reference implementations for chi-square and KS, and statsmodels for two-proportion z-test
+- `custom`: uses GhostParser manual chi-square, two-proportion z-test, and KS implementations
 
 Topology convention:
 
@@ -96,7 +96,7 @@ Parses `unique_triplets_gene_trees.txt` into a dictionary:
 
 - triplet -> `{count, species_tree, gene_trees}`
 
-### `analyze_triplet_gene_tree_file(filepath, alpha_dct=0.01, alpha_ks=0.05, discordant_test='z-test', summary_statistic='median', stats_backend='custom', rng=None, use_multiprocessing=True, processes=None)`
+### `analyze_triplet_gene_tree_file(filepath, alpha_dct=0.01, alpha_ks=0.05, discordant_test='chi-square', summary_statistic='median', stats_backend='standard', rng=None, use_multiprocessing=True, processes=None)`
 
 Runs the pipeline for all triplets in an input file with configurable discordant test and summary statistic.
 
@@ -122,7 +122,7 @@ Optional arguments:
 - `--alpha-dct`: DCT threshold (default: `0.01`)
 - `--alpha-ks`: KS threshold (default: `0.05`)
 - `--summary-statistic`: `median` (default) or `mean`
-- `--stats-backend`: `custom` (default) or `standard`
+- `--stats-backend`: `standard` (default) or `custom`
 - `-p/--processes`: worker count for triplet inference (`0` = all cores)
 - `--no-multiprocessing`: disable multiprocessing for triplet inference
 

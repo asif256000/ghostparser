@@ -113,17 +113,15 @@ Canonical topology strings:
 ### DCT-like Test Outputs
 
 - `dct_chi_statistics`
-  - Method: populated with DCT statistic value only when `--discordant-test chi-square` is used.
-  - Otherwise left empty.
+  - Method: included only when `--discordant-test chi-square` is used for the run.
 
 - `dct_z_score`
-  - Method: populated with DCT statistic value only when `--discordant-test z-test` is used.
-  - Otherwise left empty.
+  - Method: included only when `--discordant-test z-test` is used for the run.
 
 - `dct_p_value`
-  - Method: configurable discordant test on (`n_dis1`, `n_dis2`), using selected backend (`custom` default, `standard` optional):
-    - `z-test` (default): custom manual z-test in `custom`, statsmodels two-proportion z-test in `standard`
-    - `chi-square`: custom chi-square in `custom`, SciPy chi-square in `standard`
+  - Method: configurable discordant test on (`n_dis1`, `n_dis2`), using selected backend (`standard` default, `custom` optional):
+    - `chi-square` (default): custom chi-square in `custom`, SciPy chi-square in `standard`
+    - `z-test`: custom manual z-test in `custom`, statsmodels two-proportion z-test in `standard`
 
 - `dct_significant`
   - Method: `dct_p_value <= alpha_dct` (`alpha_dct` default `0.01`).
@@ -139,7 +137,7 @@ Per-gene-tree height uses:
   - Method: two-sample KS statistic between height samples of `dis1_topology` vs `con_topology`.
 
 - `ks_p_value`
-  - Method: p-value from selected backend (`custom` default, `standard` optional) for two-sided KS.
+  - Method: p-value from selected backend (`standard` default, `custom` optional) for two-sided KS.
 
 - `ks_significant`
   - Method: `ks_p_value <= alpha_ks` (`alpha_ks` default `0.05`).

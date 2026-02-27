@@ -181,7 +181,7 @@ These tests cover topology classification, discordant-count statistics, KS behav
 - `test_load_triplet_processor_config_defaults_processes_to_zero`
 
 These tests confirm omitted `processes` defaults to `0`, explicit values are preserved, and config mode precedence is enforced.
-They also validate centralized default behavior resolved through normalization (including `discordant_test=z-test`, `summary_statistic=median`, and `stats_backend=custom`).
+They also validate centralized default behavior resolved through normalization (including `discordant_test=chi-square`, `summary_statistic=median`, and `stats_backend=standard`).
 
 ## Complete Test Function Index
 
@@ -311,6 +311,8 @@ They also validate centralized default behavior resolved through normalization (
 - `test_write_pipeline_results_uses_dct_chi_statistic_column_for_chi_square`
 - `test_write_pipeline_results_uses_dct_z_score_column_for_z_test`
 - `test_write_pipeline_statistics_json`
+- `test_write_pipeline_results_rejects_mixed_discordant_test_outputs`
+- `test_write_pipeline_results_rejects_mixed_summary_statistics`
 - `test_resolve_runtime_args_triplet_processor_cli_defaults`
 - `test_resolve_runtime_args_triplet_processor_cli_custom_processes_preserved`
 - `test_resolve_runtime_args_triplet_processor_config_warns_and_ignores`

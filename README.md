@@ -175,9 +175,9 @@ python -m ghostparser.triplet_processor \
 
 - `-p` defaults to `0`, which uses all available CPU cores
 - `--no-multiprocessing` forces single-worker analysis
-- `--discordant-test` supports `z-test` (default) or `chi-square`
+- `--discordant-test` supports `chi-square` (default) or `z-test`
 - `--summary-statistic` supports `median` (default) or `mean`
-- `--stats-backend` supports `custom` (default) or `standard`
+- `--stats-backend` supports `standard` (default) or `custom`
 - `--alpha-dct` and `--alpha-ks` are configurable p-value thresholds (defaults: `0.01` and `0.05`)
 - when `-c/--config-file` is provided, other CLI options are ignored with a warning
 
@@ -224,9 +224,9 @@ For all config keys and examples, see [CONFIG.md](CONFIG.md).
 
 Core defaults are centralized and applied consistently in both CLI mode and config-file mode:
 
-- `discordant_test`: `z-test`
+- `discordant_test`: `chi-square`
 - `summary_statistic`: `median`
-- `stats_backend`: `custom`
+- `stats_backend`: `standard`
 - `alpha_dct`: `0.01`
 - `alpha_ks`: `0.05`
 - `processes`: `0` (all available CPU cores)
