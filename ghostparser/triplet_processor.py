@@ -831,6 +831,27 @@ def write_pipeline_statistics_json(results, output_filepath):
 
 def write_pipeline_results(results, output_filepath):
     """Write pipeline results to TSV file."""
+    has_chi_statistic = any(result.dct_chi_statistics is not None for result in results)
+    has_z_score = any(result.dct_z_score is not None for result in results)
+    summary_statistics = {result.summary_statistic for result in results}
+
+    if len(summary_statistics) > 1:
+        raise ValueError(
+            "Mixed summary_statistic values in one output are not supported; "
+            "use a single summary_statistic per run"
+        )
+
+    if has_chi_statistic and has_z_score:
+        raise ValueError(
+            "Mixed discordant-test outputs in one TSV are not supported; "
+            "use a single discordant_test per run"
+        )
+
+    if has_z_score:
+        dct_column = "dct_z_score"
+    else:
+        dct_column = "dct_chi_statistics"
+
     header = [
         "triplet",
         "species_tree",
@@ -841,8 +862,6 @@ def write_pipeline_results(results, output_filepath):
         "n_dis1",
         "n_dis2",
         "most_frequent_matches_concordant",
-        "dct_chi_statistics",
-        "dct_z_score",
         "dct_p_value",
         "dct_significant",
         "ks_statistic",
@@ -854,6 +873,8 @@ def write_pipeline_results(results, output_filepath):
         "classification",
         "analyzed_trees",
     ]
+
+    header.insert(9, dct_column)
 
     with open(output_filepath, "w") as out_f:
         out_f.write("\t".join(header) + "\n")
@@ -868,8 +889,6 @@ def write_pipeline_results(results, output_filepath):
                 str(result.n_dis1),
                 str(result.n_dis2),
                 str(result.most_frequent_matches_concordant),
-                "" if result.dct_chi_statistics is None else f"{result.dct_chi_statistics:.12g}",
-                "" if result.dct_z_score is None else f"{result.dct_z_score:.12g}",
                 f"{result.dct_p_value:.12g}",
                 str(result.dct_significant),
                 "" if result.ks_statistic is None else f"{result.ks_statistic:.12g}",
@@ -881,6 +900,12 @@ def write_pipeline_results(results, output_filepath):
                 result.classification,
                 str(result.analyzed_trees),
             ]
+
+            if dct_column == "dct_z_score":
+                row.insert(9, "" if result.dct_z_score is None else f"{result.dct_z_score:.12g}")
+            else:
+                row.insert(9, "" if result.dct_chi_statistics is None else f"{result.dct_chi_statistics:.12g}")
+
             out_f.write("\t".join(row) + "\n")
 
 

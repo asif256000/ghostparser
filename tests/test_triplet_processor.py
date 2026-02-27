@@ -361,7 +361,7 @@ def test_parse_analyze_and_write_pipeline_roundtrip_with_species_header(tmp_path
     assert "species_tree" in out
     assert "most_frequent_matches_concordant" in out
     assert "dct_chi_statistics" in out
-    assert "dct_z_score" in out
+    assert "dct_z_score" not in out
     assert "A,B,C" in out
 
 
@@ -536,10 +536,9 @@ def test_write_pipeline_results_uses_dct_chi_statistic_column_for_chi_square(tmp
     row = lines[1].split("\t")
 
     chi_idx = header.index("dct_chi_statistics")
-    z_idx = header.index("dct_z_score")
+    assert "dct_z_score" not in header
 
     assert row[chi_idx] != ""
-    assert row[z_idx] == ""
 
 
 def test_write_pipeline_results_uses_dct_z_score_column_for_z_test(tmp_path):
@@ -560,10 +559,9 @@ def test_write_pipeline_results_uses_dct_z_score_column_for_z_test(tmp_path):
     header = lines[0].split("\t")
     row = lines[1].split("\t")
 
-    chi_idx = header.index("dct_chi_statistics")
+    assert "dct_chi_statistics" not in header
     z_idx = header.index("dct_z_score")
 
-    assert row[chi_idx] == ""
     assert row[z_idx] != ""
 
 
@@ -579,6 +577,54 @@ def test_write_pipeline_statistics_json(tmp_path):
     assert "dct_chi_statistics" in out
     assert "dct_z_score" in out
     assert "classification" in out
+
+
+def test_write_pipeline_results_rejects_mixed_discordant_test_outputs(tmp_path):
+    species_triplet = ("A", "B", "C")
+    trees = (["((B:1,C:1):1,A:1);"] * 12) + (["((A:1,B:1):1,C:1);"] * 8) + (["((A:1,C:1):1,B:1);"] * 2)
+
+    chi_result = run_triplet_pipeline(
+        species_triplet,
+        trees,
+        species_topology=TOPOLOGY_AB,
+        discordant_test="chi-square",
+        rng=random.Random(20),
+    )
+    z_result = run_triplet_pipeline(
+        species_triplet,
+        trees,
+        species_topology=TOPOLOGY_AB,
+        discordant_test="z-test",
+        rng=random.Random(21),
+    )
+
+    output_file = tmp_path / "mixed_dct.tsv"
+    with pytest.raises(ValueError, match="Mixed discordant-test outputs"):
+        write_pipeline_results([chi_result, z_result], str(output_file))
+
+
+def test_write_pipeline_results_rejects_mixed_summary_statistics(tmp_path):
+    species_triplet = ("A", "B", "C")
+    trees = (["((B:1,C:1):1,A:1);"] * 12) + (["((A:1,B:1):1,C:1);"] * 8) + (["((A:1,C:1):1,B:1);"] * 2)
+
+    median_result = run_triplet_pipeline(
+        species_triplet,
+        trees,
+        species_topology=TOPOLOGY_AB,
+        summary_statistic="median",
+        rng=random.Random(22),
+    )
+    mean_result = run_triplet_pipeline(
+        species_triplet,
+        trees,
+        species_topology=TOPOLOGY_AB,
+        summary_statistic="mean",
+        rng=random.Random(23),
+    )
+
+    output_file = tmp_path / "mixed_summary.tsv"
+    with pytest.raises(ValueError, match="Mixed summary_statistic values"):
+        write_pipeline_results([median_result, mean_result], str(output_file))
 
 
 def test_resolve_runtime_args_triplet_processor_cli_defaults():
@@ -600,9 +646,9 @@ def test_resolve_runtime_args_triplet_processor_cli_defaults():
     assert resolved.input == "unique_triplets_gene_trees.txt"
     assert resolved.alpha_dct == 0.01
     assert resolved.alpha_ks == 0.05
-    assert resolved.discordant_test == "z-test"
+    assert resolved.discordant_test == "chi-square"
     assert resolved.summary_statistic == "median"
-    assert resolved.stats_backend == "custom"
+    assert resolved.stats_backend == "standard"
 
 
 def test_resolve_runtime_args_triplet_processor_cli_custom_processes_preserved():
