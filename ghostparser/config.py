@@ -1,4 +1,4 @@
-"""Configuration loading helpers for GhostParser CLIs."""
+"""Configuration loading and normalization helpers for GhostParser CLIs."""
 
 from __future__ import annotations
 
@@ -7,7 +7,21 @@ from pathlib import Path
 
 
 class ConfigError(ValueError):
-    """Raised when a config file is invalid or missing required fields."""
+    """Raised when a config payload is invalid or missing required fields."""
+
+
+DEFAULT_OUTPUT_FOLDER = "results"
+DEFAULT_PROCESSES = 0
+DEFAULT_MIN_SUPPORT_VALUE = 0.5
+DEFAULT_DISCORDANT_TEST = "z-test"
+DEFAULT_SUMMARY_STATISTIC = "median"
+DEFAULT_STATS_BACKEND = "custom"
+DEFAULT_ALPHA_DCT = 0.01
+DEFAULT_ALPHA_KS = 0.05
+
+DISCORDANT_TEST_CHOICES = ("chi-square", "z-test")
+SUMMARY_STATISTIC_CHOICES = ("mean", "median")
+STATS_BACKEND_CHOICES = ("custom", "standard")
 
 
 def _load_raw_config(config_file: str) -> dict:
@@ -38,15 +52,60 @@ def _load_raw_config(config_file: str) -> dict:
 
 
 def _validate_required_string(payload: dict, key: str) -> str:
-    """Validate a required non-empty string field from config payload."""
     value = payload.get(key)
     if not isinstance(value, str) or not value.strip():
         raise ConfigError(f"Missing required config field: {key}")
     return value.strip()
 
 
+def _validate_optional_string(payload: dict, key: str) -> str | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(f"Config field {key} must be a non-empty string when provided")
+    return value.strip()
+
+
+def _validate_non_negative_int(payload: dict, key: str, default: int) -> int:
+    value = payload.get(key, default)
+    if value is None:
+        value = default
+    if not isinstance(value, int) or value < 0:
+        raise ConfigError(f"Config field {key} must be an integer >= 0")
+    return value
+
+
+def _validate_optional_bool(payload: dict, key: str, default: bool) -> bool:
+    value = payload.get(key, default)
+    if value is None:
+        value = default
+    if not isinstance(value, bool):
+        raise ConfigError(f"Config field {key} must be a boolean when provided")
+    return value
+
+
+def _validate_optional_float(payload: dict, key: str, default: float) -> float:
+    value = payload.get(key, default)
+    if value is None:
+        value = default
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(f"Config field {key} must be a numeric value") from exc
+
+
+def _validate_choice(payload: dict, key: str, default: str, choices: tuple[str, ...]) -> str:
+    value = payload.get(key, default)
+    if value is None:
+        value = default
+    if not isinstance(value, str) or value not in choices:
+        raise ConfigError(f"Config field {key} must be one of: {', '.join(choices)}")
+    return value
+
+
 def _parse_outgroups(value) -> list[str]:
-    """Parse outgroup(s) value from config.
+    """Parse outgroup(s) value from payload.
 
     Accepts either:
     - a comma-separated string
@@ -64,26 +123,8 @@ def _parse_outgroups(value) -> list[str]:
     return outgroups
 
 
-def load_orchestrator_config(config_file: str) -> dict:
-    """Load and normalize orchestrator config values.
-
-    Required keys:
-    - species_tree_path
-    - gene_trees_path
-    - outgroup or outgroups
-
-    Supported optional keys:
-    - output_folder
-    - processes
-    - triplet_filter
-    - min_support_value
-    - discordant_test
-    - summary_statistic
-    - alpha_dct
-    - alpha_ks
-    """
-    payload = _load_raw_config(config_file)
-
+def normalize_orchestrator_payload(payload: dict) -> dict:
+    """Normalize orchestrator config/CLI payload to internal runtime keys with defaults."""
     species_tree = _validate_required_string(payload, "species_tree_path")
     gene_trees = _validate_required_string(payload, "gene_trees_path")
 
@@ -92,85 +133,43 @@ def load_orchestrator_config(config_file: str) -> dict:
         outgroups_source = payload.get("outgroup")
     outgroups = _parse_outgroups(outgroups_source)
 
-    output = payload.get("output_folder")
-    if output is not None:
-        if not isinstance(output, str) or not output.strip():
-            raise ConfigError("Config field output_folder must be a non-empty string when provided")
-        output = output.strip()
-
-    triplet_filter = payload.get("triplet_filter")
-    if triplet_filter is not None:
-        if not isinstance(triplet_filter, str) or not triplet_filter.strip():
-            raise ConfigError("Config field triplet_filter must be a non-empty string when provided")
-        triplet_filter = triplet_filter.strip()
-
-    processes = payload.get("processes", 0)
-    if not isinstance(processes, int) or processes < 0:
-        raise ConfigError("Config field processes must be an integer >= 0")
-
-    min_support_value = payload.get("min_support_value")
-    if min_support_value is not None:
-        try:
-            min_support_value = float(min_support_value)
-        except (TypeError, ValueError) as exc:
-            raise ConfigError("Config field min_support_value must be a numeric value") from exc
-
-    discordant_test = payload.get("discordant_test")
-    if discordant_test is not None:
-        if not isinstance(discordant_test, str) or discordant_test not in {"chi-square", "z-test"}:
-            raise ConfigError("Config field discordant_test must be one of: chi-square, z-test")
-
-    summary_statistic = payload.get("summary_statistic")
-    if summary_statistic is not None:
-        if not isinstance(summary_statistic, str) or summary_statistic not in {"mean", "median"}:
-            raise ConfigError("Config field summary_statistic must be one of: mean, median")
-
-    alpha_dct = payload.get("alpha_dct")
-    if alpha_dct is not None:
-        try:
-            alpha_dct = float(alpha_dct)
-        except (TypeError, ValueError) as exc:
-            raise ConfigError("Config field alpha_dct must be a numeric value") from exc
-
-    alpha_ks = payload.get("alpha_ks")
-    if alpha_ks is not None:
-        try:
-            alpha_ks = float(alpha_ks)
-        except (TypeError, ValueError) as exc:
-            raise ConfigError("Config field alpha_ks must be a numeric value") from exc
+    output = _validate_optional_string(payload, "output_folder")
+    if output is None:
+        output = str(Path.cwd() / DEFAULT_OUTPUT_FOLDER)
 
     return {
         "species_tree": species_tree,
         "gene_trees": gene_trees,
         "outgroup": outgroups,
-        "triplet_filter": triplet_filter,
+        "triplet_filter": _validate_optional_string(payload, "triplet_filter"),
         "output": output,
-        "processes": processes,
-        "min_support_value": min_support_value,
-        "discordant_test": discordant_test,
-        "summary_statistic": summary_statistic,
-        "alpha_dct": alpha_dct,
-        "alpha_ks": alpha_ks,
+        "processes": _validate_non_negative_int(payload, "processes", DEFAULT_PROCESSES),
+        "min_support_value": _validate_optional_float(payload, "min_support_value", DEFAULT_MIN_SUPPORT_VALUE),
+        "discordant_test": _validate_choice(
+            payload,
+            "discordant_test",
+            DEFAULT_DISCORDANT_TEST,
+            DISCORDANT_TEST_CHOICES,
+        ),
+        "summary_statistic": _validate_choice(
+            payload,
+            "summary_statistic",
+            DEFAULT_SUMMARY_STATISTIC,
+            SUMMARY_STATISTIC_CHOICES,
+        ),
+        "stats_backend": _validate_choice(
+            payload,
+            "stats_backend",
+            DEFAULT_STATS_BACKEND,
+            STATS_BACKEND_CHOICES,
+        ),
+        "alpha_dct": _validate_optional_float(payload, "alpha_dct", DEFAULT_ALPHA_DCT),
+        "alpha_ks": _validate_optional_float(payload, "alpha_ks", DEFAULT_ALPHA_KS),
     }
 
 
-def load_tree_parser_config(config_file: str) -> dict:
-    """Load and normalize tree_parser config values.
-
-    Required keys:
-    - species_tree_path
-    - gene_trees_path
-    - outgroup or outgroups
-
-    Supported optional keys:
-    - output_folder
-    - processes
-    - triplet_filter
-    - min_support_value
-    - no_multiprocessing
-    """
-    payload = _load_raw_config(config_file)
-
+def normalize_tree_parser_payload(payload: dict) -> dict:
+    """Normalize tree_parser config/CLI payload to internal runtime keys with defaults."""
     species_tree = _validate_required_string(payload, "species_tree_path")
     gene_trees = _validate_required_string(payload, "gene_trees_path")
 
@@ -179,117 +178,64 @@ def load_tree_parser_config(config_file: str) -> dict:
         outgroups_source = payload.get("outgroup")
     outgroups = _parse_outgroups(outgroups_source)
 
-    output = payload.get("output_folder")
-    if output is not None:
-        if not isinstance(output, str) or not output.strip():
-            raise ConfigError("Config field output_folder must be a non-empty string when provided")
-        output = output.strip()
-
-    triplet_filter = payload.get("triplet_filter")
-    if triplet_filter is not None:
-        if not isinstance(triplet_filter, str) or not triplet_filter.strip():
-            raise ConfigError("Config field triplet_filter must be a non-empty string when provided")
-        triplet_filter = triplet_filter.strip()
-
-    processes = payload.get("processes", 0)
-    if not isinstance(processes, int) or processes < 0:
-        raise ConfigError("Config field processes must be an integer >= 0")
-
-    min_support_value = payload.get("min_support_value")
-    if min_support_value is not None:
-        try:
-            min_support_value = float(min_support_value)
-        except (TypeError, ValueError) as exc:
-            raise ConfigError("Config field min_support_value must be a numeric value") from exc
-
-    no_multiprocessing = payload.get("no_multiprocessing")
-    if no_multiprocessing is not None and not isinstance(no_multiprocessing, bool):
-        raise ConfigError("Config field no_multiprocessing must be a boolean when provided")
-
     return {
         "species_tree": species_tree,
         "gene_trees": gene_trees,
         "outgroup": outgroups,
-        "triplet_filter": triplet_filter,
-        "output": output,
-        "processes": processes,
-        "min_support_value": min_support_value,
-        "no_multiprocessing": no_multiprocessing,
+        "triplet_filter": _validate_optional_string(payload, "triplet_filter"),
+        "output": _validate_optional_string(payload, "output_folder"),
+        "processes": _validate_non_negative_int(payload, "processes", DEFAULT_PROCESSES),
+        "min_support_value": _validate_optional_float(payload, "min_support_value", DEFAULT_MIN_SUPPORT_VALUE),
+        "no_multiprocessing": _validate_optional_bool(payload, "no_multiprocessing", False),
     }
 
 
-def load_triplet_processor_config(config_file: str) -> dict:
-    """Load and normalize triplet_processor config values.
-
-    Required keys:
-    - input_path
-
-    Supported optional keys:
-    - output_path
-    - stats_output
-    - alpha_dct
-    - alpha_ks
-    - discordant_test
-    - summary_statistic
-    - processes
-    - no_multiprocessing
-    """
-    payload = _load_raw_config(config_file)
-
+def normalize_triplet_processor_payload(payload: dict) -> dict:
+    """Normalize triplet_processor config/CLI payload to internal runtime keys with defaults."""
     input_path = _validate_required_string(payload, "input_path")
-
-    output_path = payload.get("output_path")
-    if output_path is not None:
-        if not isinstance(output_path, str) or not output_path.strip():
-            raise ConfigError("Config field output_path must be a non-empty string when provided")
-        output_path = output_path.strip()
-
-    stats_output = payload.get("stats_output")
-    if stats_output is not None:
-        if not isinstance(stats_output, str) or not stats_output.strip():
-            raise ConfigError("Config field stats_output must be a non-empty string when provided")
-        stats_output = stats_output.strip()
-
-    alpha_dct = payload.get("alpha_dct")
-    if alpha_dct is not None:
-        try:
-            alpha_dct = float(alpha_dct)
-        except (TypeError, ValueError) as exc:
-            raise ConfigError("Config field alpha_dct must be a numeric value") from exc
-
-    alpha_ks = payload.get("alpha_ks")
-    if alpha_ks is not None:
-        try:
-            alpha_ks = float(alpha_ks)
-        except (TypeError, ValueError) as exc:
-            raise ConfigError("Config field alpha_ks must be a numeric value") from exc
-
-    discordant_test = payload.get("discordant_test")
-    if discordant_test is not None:
-        if not isinstance(discordant_test, str) or discordant_test not in {"chi-square", "z-test"}:
-            raise ConfigError("Config field discordant_test must be one of: chi-square, z-test")
-
-    summary_statistic = payload.get("summary_statistic")
-    if summary_statistic is not None:
-        if not isinstance(summary_statistic, str) or summary_statistic not in {"mean", "median"}:
-            raise ConfigError("Config field summary_statistic must be one of: mean, median")
-
-    processes = payload.get("processes", 0)
-    if not isinstance(processes, int) or processes < 0:
-        raise ConfigError("Config field processes must be an integer >= 0")
-
-    no_multiprocessing = payload.get("no_multiprocessing")
-    if no_multiprocessing is not None and not isinstance(no_multiprocessing, bool):
-        raise ConfigError("Config field no_multiprocessing must be a boolean when provided")
 
     return {
         "input": input_path,
-        "output": output_path,
-        "stats_output": stats_output,
-        "alpha_dct": alpha_dct,
-        "alpha_ks": alpha_ks,
-        "discordant_test": discordant_test,
-        "summary_statistic": summary_statistic,
-        "processes": processes,
-        "no_multiprocessing": no_multiprocessing,
+        "output": _validate_optional_string(payload, "output_path"),
+        "stats_output": _validate_optional_string(payload, "stats_output"),
+        "alpha_dct": _validate_optional_float(payload, "alpha_dct", DEFAULT_ALPHA_DCT),
+        "alpha_ks": _validate_optional_float(payload, "alpha_ks", DEFAULT_ALPHA_KS),
+        "discordant_test": _validate_choice(
+            payload,
+            "discordant_test",
+            DEFAULT_DISCORDANT_TEST,
+            DISCORDANT_TEST_CHOICES,
+        ),
+        "summary_statistic": _validate_choice(
+            payload,
+            "summary_statistic",
+            DEFAULT_SUMMARY_STATISTIC,
+            SUMMARY_STATISTIC_CHOICES,
+        ),
+        "stats_backend": _validate_choice(
+            payload,
+            "stats_backend",
+            DEFAULT_STATS_BACKEND,
+            STATS_BACKEND_CHOICES,
+        ),
+        "processes": _validate_non_negative_int(payload, "processes", DEFAULT_PROCESSES),
+        "no_multiprocessing": _validate_optional_bool(payload, "no_multiprocessing", False),
     }
+
+
+def load_orchestrator_config(config_file: str) -> dict:
+    """Load and normalize orchestrator config values from JSON/YAML file."""
+    payload = _load_raw_config(config_file)
+    return normalize_orchestrator_payload(payload)
+
+
+def load_tree_parser_config(config_file: str) -> dict:
+    """Load and normalize tree_parser config values from JSON/YAML file."""
+    payload = _load_raw_config(config_file)
+    return normalize_tree_parser_payload(payload)
+
+
+def load_triplet_processor_config(config_file: str) -> dict:
+    """Load and normalize triplet_processor config values from JSON/YAML file."""
+    payload = _load_raw_config(config_file)
+    return normalize_triplet_processor_payload(payload)
