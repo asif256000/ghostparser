@@ -23,7 +23,7 @@ python -m ghostparser.orchestrator \
   -og Ephemera_danica,Isonychia_kiangsinensis
 ```
 
-If both `-c/--config-file` and other CLI args are provided, config mode is used and the other CLI args are ignored with a warning.
+If `-c/--config-file` and other CLI args are provided together, config mode is used and the other CLI args are ignored with a warning.
 
 CLI mode internally normalizes provided flags into the same key/value configuration payload used by config files, so validation and defaults are consistent across both modes.
 
@@ -187,5 +187,5 @@ See examples in:
 ## Notes
 
 - Paths in config are interpreted relative to the current working directory unless absolute paths are used.
-- In config mode, CLI options other than `-c/--config-file` are ignored.
-- Use `-p 1` (or `processes: 1`) to avoid multiprocessing while still using the same pipeline.
+- In config mode, CLI options other than `--config-file` are ignored.
+- Use `--processes 1` (or `processes: 1`) to avoid multiprocessing while still using the same pipeline.

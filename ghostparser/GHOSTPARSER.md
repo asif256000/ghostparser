@@ -107,7 +107,7 @@ Writes per-triplet results to a TSV file with counts, DCT/KS statistics, selecte
 ### CLI usage
 
 ```bash
-python -m ghostparser.triplet_processor -i unique_triplets_gene_trees.txt
+python -m ghostparser.triplet_processor --input-path unique_triplets_gene_trees.txt
 ```
 
 Config-file mode:
@@ -118,12 +118,12 @@ python -m ghostparser.triplet_processor -c sample_configs/triplet_processor_mini
 
 Optional arguments:
 
-- `-o/--output`: output TSV path (default: `triplet_introgression_results.tsv` next to input)
+- `--output-path`: output TSV path (default: `triplet_introgression_results.tsv` next to input)
 - `--alpha-dct`: DCT threshold (default: `0.01`)
 - `--alpha-ks`: KS threshold (default: `0.05`)
 - `--summary-statistic`: `median` (default) or `mean`
 - `--stats-backend`: `standard` (default) or `custom`
-- `-p/--processes`: worker count for triplet inference (`0` = all cores)
+- `--processes`: worker count for triplet inference (`0` = all cores)
 - `--no-multiprocessing`: disable multiprocessing for triplet inference
 
 When `-c/--config-file` is provided, other CLI options are ignored with a warning.
@@ -476,12 +476,12 @@ python -m ghostparser.tree_parser -st SPECIES_TREE -gt GENE_TREES -og OUTGROUP
 **Arguments:**
 
 **Required:**
-- `-st, --species_tree`: Path to species tree file in Newick format
-- `-gt, --gene_trees`: Path to gene trees file in Newick format
-- `-og, --outgroup`: Outgroup species identifier
+- `-st, --species-tree-path`: Path to species tree file in Newick format
+- `-gt, --gene-trees-path`: Path to gene trees file in Newick format
+- `-og, --outgroups`: Outgroup species identifier(s), comma-separated when multiple
 
 **Optional:**
-- `-p, --processes`: Number of worker processes for multiprocessing (only used when multiprocessing is enabled).
+- `--processes`: Number of worker processes for multiprocessing (only used when multiprocessing is enabled).
                     Defaults to `0` (all cores). Ignored if `--no-multiprocessing` is set.
 - `--no-multiprocessing`: Disable multiprocessing for triplet extraction.
                          Processes triplets sequentially on a single worker.
@@ -497,9 +497,9 @@ python -m ghostparser.tree_parser -st SPECIES_TREE -gt GENE_TREES -og OUTGROUP
 
 ```bash
 python -m ghostparser.tree_parser \
-    -st data/species.tree \
-    -gt data/genes.tree \
-    -og OutGroup
+   -st data/species.tree \
+   -gt data/genes.tree \
+   -og OutGroup
 ```
 
 ## Workflow Details

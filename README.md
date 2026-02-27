@@ -53,15 +53,21 @@ python -m ghostparser.tree_parser -c sample_configs/tree_parser_minimal.yaml
 The arguments below are for `tree_parser`:
 
 **Required:**
-- `-st, --species_tree`: Path to the species tree file in Newick format
-- `-gt, --gene_trees`: Path to the gene trees file in Newick format
-- `-og, --outgroup`: Outgroup species identifier(s). Use comma-separated taxa for multiple outgroups.
+- `--species-tree-path`: Path to the species tree file in Newick format
+- `--gene-trees-path`: Path to the gene trees file in Newick format
+- `--outgroups`: Outgroup species identifier(s). Use comma-separated taxa for multiple outgroups.
+
+Short aliases:
+- `-st` for `--species-tree-path`
+- `-gt` for `--gene-trees-path`
+- `-og` for `--outgroups`
+- `-c` for `--config-file`
 
 **Optional:**
-- `-o, --output`: Output folder relative to the input data folder (default: same folder as input data).
-- `-tf, --triplet-filter`: Path to a triplet filter file (comma-separated taxa per line). When provided, only those
+- `--output-folder`: Output folder relative to the input data folder (default: same folder as input data).
+- `--triplet-filter`: Path to a triplet filter file (comma-separated taxa per line). When provided, only those
     triplets are processed. Triplets containing taxa missing from the species tree are skipped with a warning.
-- `-p, --processes`: Number of worker processes for multiprocessing (only used with `-p/--processes`).
+- `--processes`: Number of worker processes for multiprocessing.
                     Defaults to `0` (all cores). Ignored if `--no-multiprocessing` is set.
 - `--no-multiprocessing`: Disable multiprocessing. Processes triplets sequentially using a single worker.
                          Useful for debugging or on systems with limited resources.
@@ -108,7 +114,7 @@ Triplet filter file (comma-separated taxa per line):
 `triplets.txt` is an input filter file; only those triplets are processed.
 
 ```bash
-python -m ghostparser.tree_parser -st species.tree -gt genes.tree -og OutGroup -tf triplets.txt
+python -m ghostparser.tree_parser -st species.tree -gt genes.tree -og OutGroup --triplet-filter triplets.txt
 ```
 
 When multiple outgroups are provided, the species tree is rooted on their most recent common ancestor (MRCA) and
@@ -143,15 +149,15 @@ Note: module-specific guides live under the [ghostparser](ghostparser/) folder.
 After generating `unique_triplets_gene_trees.txt` with `tree_parser`, run:
 
 ```bash
-python -m ghostparser.triplet_processor -i unique_triplets_gene_trees.txt
+python -m ghostparser.triplet_processor --input-path unique_triplets_gene_trees.txt
 ```
 
 Optional thresholds and output path:
 
 ```bash
 python -m ghostparser.triplet_processor \
-    -i unique_triplets_gene_trees.txt \
-    -o triplet_introgression_results.tsv \
+    --input-path unique_triplets_gene_trees.txt \
+    --output-path triplet_introgression_results.tsv \
     --discordant-test z-test \
     --summary-statistic median \
     --stats-backend custom \
@@ -169,11 +175,11 @@ Optional multiprocessing for `triplet_processor`:
 
 ```bash
 python -m ghostparser.triplet_processor \
-    -i unique_triplets_gene_trees.txt \
-    -p 0
+    --input-path unique_triplets_gene_trees.txt \
+    --processes 0
 ```
 
-- `-p` defaults to `0`, which uses all available CPU cores
+- `--processes` defaults to `0`, which uses all available CPU cores
 - `--no-multiprocessing` forces single-worker analysis
 - `--discordant-test` supports `chi-square` (default) or `z-test`
 - `--summary-statistic` supports `median` (default) or `mean`
@@ -207,15 +213,15 @@ python -m ghostparser.orchestrator -c run_config.yaml
 CLI mode (without config file):
 
 ```bash
-python -m ghostparser.orchestrator -st species.tree -gt genes.tree -og OutGroup -p 0
+python -m ghostparser.orchestrator -st species.tree -gt genes.tree -og OutGroup --processes 0
 ```
 
 Notes:
 
-- `-p` defaults to `0`, which uses all available CPU cores
-- `-o/--output` defaults to `./results` (current working directory)
+- `--processes` defaults to `0`, which uses all available CPU cores
+- `--output-folder` defaults to `./results` (current working directory)
 - `-c/--config-file` can be combined with other CLI options, but CLI values are ignored with a warning
-- use `-p 1` for effective single-worker execution
+- use `--processes 1` for effective single-worker execution
 - orchestrator runs in two stages: first generate `unique_triplets_gene_trees.txt`, then run `triplet_processor` on that file
 
 For all config keys and examples, see [CONFIG.md](CONFIG.md).

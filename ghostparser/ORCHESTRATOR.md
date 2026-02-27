@@ -22,20 +22,20 @@ python -m ghostparser.orchestrator -c <config.yaml>
 
 Options:
 
-- `-st`, `--species_tree` (required)
+- `-st`, `--species-tree-path` (required)
   - Path to species tree file (Newick).
-- `-gt`, `--gene_trees` (required)
+- `-gt`, `--gene-trees-path` (required)
   - Path to gene trees file (Newick, one tree per line).
-- `-og`, `--outgroup` (required)
+- `-og`, `--outgroups` (required)
   - Outgroup taxon name(s). Multiple outgroups are comma-separated.
 - `-c`, `--config-file` (optional)
   - Path to JSON/YAML config file.
   - When provided, other CLI options are ignored and a warning is printed.
-- `-tf`, `--triplet-filter` (optional)
+- `--triplet-filter` (optional)
   - Path to triplet file (`taxon1,taxon2,taxon3` per line). If omitted, triplets are generated from species-tree ingroup taxa.
-- `-o`, `--output` (optional)
+- `--output-folder` (optional)
   - Output folder path. Default is `./results` (from the current working directory).
-- `-p`, `--processes` (optional)
+- `--processes` (optional)
   - Worker processes for both triplet extraction (`tree_parser`) and per-triplet inference (`triplet_processor`).
   - Defaults to `0`, which means all available CPU cores (`cpu_count()`).
 
@@ -203,5 +203,5 @@ How to read this example quickly:
 
 - Multiprocessing is applied during triplet extraction via `write_triplet_gene_trees_multiprocess`.
 - Multiprocessing is also applied during inference via `triplet_processor.analyze_triplet_gene_tree_file`.
-- `-p 0` explicitly resolves to all cores via `cpu_count()`.
-- Use `-p 1` for effective single-worker execution.
+- `--processes 0` explicitly resolves to all cores via `cpu_count()`.
+- Use `--processes 1` for effective single-worker execution.
