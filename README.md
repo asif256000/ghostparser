@@ -152,8 +152,9 @@ Optional thresholds and output path:
 python -m ghostparser.triplet_processor \
     -i unique_triplets_gene_trees.txt \
     -o triplet_introgression_results.tsv \
-    --discordant-test chi-square \
-    --summary-statistic mean \
+    --discordant-test z-test \
+    --summary-statistic median \
+    --stats-backend custom \
     --alpha-dct 0.01 \
     --alpha-ks 0.05
 ```
@@ -174,10 +175,13 @@ python -m ghostparser.triplet_processor \
 
 - `-p` defaults to `0`, which uses all available CPU cores
 - `--no-multiprocessing` forces single-worker analysis
-- `--discordant-test` supports `chi-square` (default) or `z-test`
-- `--summary-statistic` supports `mean` (default) or `median`
+- `--discordant-test` supports `z-test` (default) or `chi-square`
+- `--summary-statistic` supports `median` (default) or `mean`
+- `--stats-backend` supports `custom` (default) or `standard`
 - `--alpha-dct` and `--alpha-ks` are configurable p-value thresholds (defaults: `0.01` and `0.05`)
 - when `-c/--config-file` is provided, other CLI options are ignored with a warning
+
+CLI mode and config-file mode share the same normalization and default-validation path.
 
 Triplet topology convention in `triplet_processor`:
 
@@ -215,6 +219,26 @@ Notes:
 - orchestrator runs in two stages: first generate `unique_triplets_gene_trees.txt`, then run `triplet_processor` on that file
 
 For all config keys and examples, see [CONFIG.md](CONFIG.md).
+
+## Defaults at a Glance
+
+Core defaults are centralized and applied consistently in both CLI mode and config-file mode:
+
+- `discordant_test`: `z-test`
+- `summary_statistic`: `median`
+- `stats_backend`: `custom`
+- `alpha_dct`: `0.01`
+- `alpha_ks`: `0.05`
+- `processes`: `0` (all available CPU cores)
+- `output_folder` (orchestrator/tree_parser): `./results`
+- `min_support_value`: `0.5`
+
+Backend details:
+
+- `custom`: uses GhostParser manual implementations for chi-square, two-proportion z-test, and KS test
+- `standard`: uses SciPy for chi-square/KS and statsmodels for two-proportion z-test
+
+When `-c/--config-file` is provided, other CLI flags are ignored with a warning.
 
 Primary orchestrator outputs:
 
