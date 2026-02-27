@@ -6,6 +6,7 @@ import random
 import dendropy
 import pytest
 from scipy import stats
+from statsmodels.stats.proportion import proportions_ztest
 
 import ghostparser.triplet_processor as triplet_processor_module
 
@@ -16,6 +17,7 @@ from ghostparser.triplet_processor import (
     compute_tree_height_statistic,
     parse_triplet_gene_trees_file,
     pearson_discordant_chi_square_test,
+    run_discordant_count_test,
     run_triplet_pipeline,
     two_sample_ks_test,
     two_sample_ks_test_hybrid,
@@ -107,6 +109,31 @@ def test_custom_chi_square_matches_scipy_reference_randomized():
 
 
 @pytest.mark.reference
+def test_custom_z_test_matches_statsmodels_reference_randomized():
+    rng = random.Random(234)
+    for _ in range(1000):
+        n_dis1 = rng.randint(0, 500)
+        n_dis2 = rng.randint(0, 500)
+
+        custom_stat, custom_p = two_proportion_discordant_z_test(n_dis1, n_dis2)
+
+        total = n_dis1 + n_dis2
+        if total == 0:
+            assert custom_stat == pytest.approx(0.0)
+            assert custom_p == pytest.approx(1.0)
+            continue
+
+        ref_stat, ref_p = proportions_ztest(
+            count=[n_dis1, n_dis2],
+            nobs=[total, total],
+            alternative="two-sided",
+        )
+
+        assert custom_stat == pytest.approx(float(ref_stat), rel=0.0, abs=1e-12)
+        assert custom_p == pytest.approx(float(ref_p), rel=0.0, abs=1e-12)
+
+
+@pytest.mark.reference
 def test_custom_ks_matches_scipy_asymptotic_reference_randomized():
     rng = random.Random(456)
     p_diffs = []
@@ -165,6 +192,51 @@ def test_run_triplet_pipeline_supports_z_test_for_discordant_counts():
     assert result.dct_p_value < 0.01
     assert result.dct_z_score is not None
     assert result.dct_chi_statistics is None
+
+
+def test_run_triplet_pipeline_supports_standard_stats_backend():
+    species_triplet = ("A", "B", "C")
+    trees = (["((B:1,C:1):1,A:1);"] * 12) + (["((A:1,B:1):1,C:1);"] * 8) + (["((A:1,C:1):1,B:1);"] * 4)
+
+    result = run_triplet_pipeline(
+        species_triplet,
+        trees,
+        species_topology=TOPOLOGY_AB,
+        discordant_test="chi-square",
+        stats_backend="standard",
+    )
+
+    assert result.dct_chi_statistics is not None
+    assert result.dct_z_score is None
+
+
+@pytest.mark.reference
+def test_standard_z_test_matches_statsmodels_reference_randomized():
+    rng = random.Random(789)
+    for _ in range(1000):
+        n_dis1 = rng.randint(0, 500)
+        n_dis2 = rng.randint(0, 500)
+
+        standard_stat, standard_p = run_discordant_count_test(
+            n_dis1,
+            n_dis2,
+            method="z-test",
+            stats_backend="standard",
+        )
+
+        total = n_dis1 + n_dis2
+        if total == 0:
+            assert standard_stat == pytest.approx(0.0)
+            assert standard_p == pytest.approx(1.0)
+            continue
+
+        ref_stat, ref_p = proportions_ztest(
+            count=[n_dis1, n_dis2],
+            nobs=[total, total],
+            alternative="two-sided",
+        )
+        assert standard_stat == pytest.approx(float(ref_stat), rel=0.0, abs=1e-12)
+        assert standard_p == pytest.approx(float(ref_p), rel=0.0, abs=1e-12)
 
 
 def test_run_triplet_pipeline_supports_median_summary_statistic():
@@ -341,6 +413,20 @@ def test_analyze_triplet_gene_tree_file_rejects_unknown_summary_statistic(tmp_pa
         analyze_triplet_gene_tree_file(str(input_file), summary_statistic="mode")
 
 
+def test_analyze_triplet_gene_tree_file_rejects_unknown_stats_backend(tmp_path):
+    content = """A,B,C\t3\t((A:1,B:1):1,C:1);
+
+((A:1,B:1):1,C:1);
+((B:1,C:1):1,A:1);
+((A:1,C:1):1,B:1);
+"""
+    input_file = tmp_path / "unique_triplets_gene_trees.txt"
+    input_file.write_text(content)
+
+    with pytest.raises(ValueError, match="Unsupported stats backend"):
+        analyze_triplet_gene_tree_file(str(input_file), stats_backend="numpy")
+
+
 @pytest.mark.reference
 def test_two_sample_ks_test_hybrid_uses_scipy_near_threshold(monkeypatch):
     monkeypatch.setattr(triplet_processor_module, "two_sample_ks_test", lambda *_: (0.12, 0.051))
@@ -503,8 +589,9 @@ def test_resolve_runtime_args_triplet_processor_cli_defaults():
         stats_output=None,
         alpha_dct=0.01,
         alpha_ks=0.05,
-        discordant_test="chi-square",
-        summary_statistic="mean",
+        discordant_test=None,
+        summary_statistic=None,
+        stats_backend=None,
         processes=0,
         no_multiprocessing=False,
     )
@@ -513,8 +600,9 @@ def test_resolve_runtime_args_triplet_processor_cli_defaults():
     assert resolved.input == "unique_triplets_gene_trees.txt"
     assert resolved.alpha_dct == 0.01
     assert resolved.alpha_ks == 0.05
-    assert resolved.discordant_test == "chi-square"
-    assert resolved.summary_statistic == "mean"
+    assert resolved.discordant_test == "z-test"
+    assert resolved.summary_statistic == "median"
+    assert resolved.stats_backend == "custom"
 
 
 def test_resolve_runtime_args_triplet_processor_cli_custom_processes_preserved():
@@ -525,8 +613,9 @@ def test_resolve_runtime_args_triplet_processor_cli_custom_processes_preserved()
         stats_output=None,
         alpha_dct=0.01,
         alpha_ks=0.05,
-        discordant_test="chi-square",
-        summary_statistic="mean",
+        discordant_test=None,
+        summary_statistic=None,
+        stats_backend=None,
         processes=8,
         no_multiprocessing=False,
     )
@@ -543,7 +632,8 @@ def test_resolve_runtime_args_triplet_processor_config_warns_and_ignores(tmp_pat
   "input_path": "input.tsv",
   "output_path": "out.tsv",
   "discordant_test": "z-test",
-  "summary_statistic": "median"
+    "summary_statistic": "median",
+        "stats_backend": "standard"
 }
 """.strip()
     )
@@ -557,6 +647,7 @@ def test_resolve_runtime_args_triplet_processor_config_warns_and_ignores(tmp_pat
         alpha_ks=0.05,
         discordant_test="chi-square",
         summary_statistic="mean",
+        stats_backend="custom",
         processes=0,
         no_multiprocessing=False,
     )
@@ -569,6 +660,7 @@ def test_resolve_runtime_args_triplet_processor_config_warns_and_ignores(tmp_pat
     assert resolved.output == "out.tsv"
     assert resolved.discordant_test == "z-test"
     assert resolved.summary_statistic == "median"
+    assert resolved.stats_backend == "standard"
 
 
 def test_resolve_runtime_args_triplet_processor_config_processes_preserved_when_set(tmp_path):
@@ -591,6 +683,7 @@ def test_resolve_runtime_args_triplet_processor_config_processes_preserved_when_
         alpha_ks=0.05,
         discordant_test="chi-square",
         summary_statistic="mean",
+        stats_backend="custom",
         processes=0,
         no_multiprocessing=False,
     )
@@ -618,6 +711,7 @@ def test_resolve_runtime_args_triplet_processor_config_defaults_processes_to_zer
         alpha_ks=0.05,
         discordant_test="chi-square",
         summary_statistic="mean",
+        stats_backend="custom",
         processes=11,
         no_multiprocessing=False,
     )
