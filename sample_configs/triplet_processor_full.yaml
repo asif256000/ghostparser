@@ -3,7 +3,8 @@ output_path: data/asuv21/asuv_all/triplet_introgression_results.tsv
 stats_output: data/asuv21/asuv_all/triplet_introgression_results.json
 alpha_dct: 0.01
 alpha_ks: 0.05
-discordant_test: chi-square
-summary_statistic: mean
+discordant_test: z-test
+summary_statistic: median
+stats_backend: custom
 processes: 0
 no_multiprocessing: false
