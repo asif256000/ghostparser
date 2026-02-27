@@ -31,12 +31,12 @@ import dendropy
 from scipy import stats
 from statsmodels.stats.proportion import proportions_ztest
 
+from .cli_config import resolve_cli_or_config_args
 from .config import (
     ConfigError,
     DEFAULT_ALPHA_DCT,
     DEFAULT_ALPHA_KS,
     DEFAULT_DISCORDANT_TEST,
-    DEFAULT_PROCESSES,
     DEFAULT_STATS_BACKEND,
     DEFAULT_SUMMARY_STATISTIC,
     DISCORDANT_TEST_CHOICES,
@@ -48,8 +48,6 @@ from .config import (
 from .triplet_utils import (
     ALL_TOPOLOGIES,
     TOPOLOGY_AB,
-    TOPOLOGY_AC,
-    TOPOLOGY_BC,
     classify_triplet_topology_string,
     rank_topologies_by_frequency,
 )
@@ -57,6 +55,8 @@ from .triplet_utils import (
 
 Classification = str
 SerializedTripletObservation = tuple[str, float]
+
+
 @dataclass(frozen=True)
 class TripletPipelineResult:
     """Result of running the GhostParser pipeline for one rooted species triplet."""
@@ -947,15 +947,16 @@ def _build_argument_parser():
     """Build triplet_processor CLI argument parser."""
     parser = argparse.ArgumentParser(description="Run GhostParser triplet processing pipeline (Fig. 6).")
     parser.add_argument("-c", "--config-file", default=None, help="Path to a JSON or YAML config file")
-    parser.add_argument("-i", "--input", default=None, help="Path to unique_triplets_gene_trees.txt")
-    parser.add_argument("-o", "--output", default=None, help="Output TSV path (default: alongside input)")
+    parser.add_argument("--input-path", default=None, help="Path to unique_triplets_gene_trees.txt")
+    parser.add_argument("--output-path", default=None, help="Output TSV path (default: alongside input)")
     parser.add_argument(
         "--stats-output",
+        dest="stats_output",
         default=None,
         help="Optional JSON output path for full per-triplet statistics",
     )
-    parser.add_argument("--alpha-dct", type=float, default=0.01, help="DCT significance threshold (default: 0.01)")
-    parser.add_argument("--alpha-ks", type=float, default=0.05, help="KS significance threshold (default: 0.05)")
+    parser.add_argument("--alpha-dct", type=float, default=None, help="DCT significance threshold (default: 0.01)")
+    parser.add_argument("--alpha-ks", type=float, default=None, help="KS significance threshold (default: 0.05)")
     parser.add_argument(
         "--discordant-test",
         choices=DISCORDANT_TEST_CHOICES,
@@ -974,13 +975,7 @@ def _build_argument_parser():
         default=None,
         help=f"Statistical backend for DCT/KS calculations (default: {DEFAULT_STATS_BACKEND})",
     )
-    parser.add_argument(
-        "-p",
-        "--processes",
-        type=int,
-        default=DEFAULT_PROCESSES,
-        help="Number of worker processes for triplet analysis (0 = all cores)",
-    )
+    parser.add_argument("--processes", type=int, default=None, help="Number of worker processes for triplet analysis (0 = all cores)")
     parser.add_argument(
         "--no-multiprocessing",
         action="store_true",
@@ -989,59 +984,28 @@ def _build_argument_parser():
     return parser
 
 
-def _cli_args_used_alongside_config(args):
-    """Return names of non-config CLI args provided together with --config-file."""
-    provided = []
-    if args.input is not None:
-        provided.append("--input")
-    if args.output is not None:
-        provided.append("--output")
-    if args.stats_output is not None:
-        provided.append("--stats-output")
-    if args.alpha_dct != DEFAULT_ALPHA_DCT:
-        provided.append("--alpha-dct")
-    if args.alpha_ks != DEFAULT_ALPHA_KS:
-        provided.append("--alpha-ks")
-    if args.discordant_test is not None:
-        provided.append("--discordant-test")
-    if args.summary_statistic is not None:
-        provided.append("--summary-statistic")
-    if args.stats_backend is not None:
-        provided.append("--stats-backend")
-    if args.processes != DEFAULT_PROCESSES:
-        provided.append("--processes")
-    if args.no_multiprocessing:
-        provided.append("--no-multiprocessing")
-    return provided
+TRIPLET_PROCESSOR_PAYLOAD_ARG_NAMES = [
+    "input_path",
+    "output_path",
+    "stats_output",
+    "alpha_dct",
+    "alpha_ks",
+    "discordant_test",
+    "summary_statistic",
+    "stats_backend",
+    "processes",
+    "no_multiprocessing",
+]
 
 
 def _resolve_runtime_args(args):
     """Resolve runtime arguments from config-file mode or plain CLI mode."""
-    if args.config_file:
-        ignored_cli_args = _cli_args_used_alongside_config(args)
-        if ignored_cli_args:
-            print(
-                "Warning: --config-file provided; CLI arguments not in config will be ignored: "
-                + ", ".join(ignored_cli_args)
-            )
-
-        config = load_triplet_processor_config(args.config_file)
-        return argparse.Namespace(**config)
-
-    payload = {
-        "input_path": args.input,
-        "output_path": args.output,
-        "stats_output": args.stats_output,
-        "alpha_dct": args.alpha_dct,
-        "alpha_ks": args.alpha_ks,
-        "discordant_test": args.discordant_test,
-        "summary_statistic": args.summary_statistic,
-        "stats_backend": args.stats_backend,
-        "processes": args.processes,
-        "no_multiprocessing": args.no_multiprocessing,
-    }
-    config = normalize_triplet_processor_payload(payload)
-    return argparse.Namespace(**config)
+    return resolve_cli_or_config_args(
+        args,
+        load_config=load_triplet_processor_config,
+        normalize_payload=normalize_triplet_processor_payload,
+        payload_arg_names=TRIPLET_PROCESSOR_PAYLOAD_ARG_NAMES,
+    )
 
 
 if __name__ == "__main__":

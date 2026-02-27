@@ -11,10 +11,10 @@ from Bio import Phylo
 from Bio.Phylo.BaseTree import Clade, Tree
 import dendropy
 
+from .cli_config import resolve_cli_or_config_args
 from .config import (
     ConfigError,
     DEFAULT_MIN_SUPPORT_VALUE,
-    DEFAULT_PROCESSES,
     load_tree_parser_config,
     normalize_tree_parser_payload,
 )
@@ -1071,28 +1071,25 @@ def _build_argument_parser():
     )
 
     parser.add_argument("-c", "--config-file", type=str, default=None, help="Path to a JSON or YAML config file")
-    parser.add_argument("-st", "--species_tree", default=None, help="Path to the species tree file in Newick format")
-    parser.add_argument("-gt", "--gene_trees", default=None, help="Path to the gene trees file in Newick format")
-    parser.add_argument("-og", "--outgroup", default=None, help="Outgroup species identifier")
+    parser.add_argument("-st", "--species-tree-path", default=None, help="Path to the species tree file in Newick format")
+    parser.add_argument("-gt", "--gene-trees-path", default=None, help="Path to the gene trees file in Newick format")
+    parser.add_argument("-og", "--outgroups", default=None, help="Outgroup species identifier(s), comma-separated")
     parser.add_argument(
-        "-tf",
         "--triplet-filter",
         type=str,
         default=None,
         help="Path to triplet filter file (comma-separated taxa per line)",
     )
     parser.add_argument(
-        "-o",
-        "--output",
+        "--output-folder",
         type=str,
         default=None,
         help="Output folder relative to input data folder (default: same folder as input data)",
     )
     parser.add_argument(
-        "-p",
         "--processes",
         type=int,
-        default=DEFAULT_PROCESSES,
+        default=None,
         help="Number of worker processes for triplet extraction (default: 0 = all cores)",
     )
     parser.add_argument(
@@ -1103,50 +1100,25 @@ def _build_argument_parser():
     return parser
 
 
-def _cli_args_used_alongside_config(args):
-    """Return names of non-config CLI args provided together with --config-file."""
-    provided = []
-    if args.species_tree is not None:
-        provided.append("--species_tree")
-    if args.gene_trees is not None:
-        provided.append("--gene_trees")
-    if args.outgroup is not None:
-        provided.append("--outgroup")
-    if args.triplet_filter is not None:
-        provided.append("--triplet-filter")
-    if args.output is not None:
-        provided.append("--output")
-    if args.processes != DEFAULT_PROCESSES:
-        provided.append("--processes")
-    if args.no_multiprocessing:
-        provided.append("--no-multiprocessing")
-    return provided
+TREE_PARSER_PAYLOAD_ARG_NAMES = [
+    "species_tree_path",
+    "gene_trees_path",
+    "outgroups",
+    "triplet_filter",
+    "output_folder",
+    "processes",
+    "no_multiprocessing",
+]
 
 
 def _resolve_runtime_args(args):
     """Resolve runtime arguments from config-file mode or plain CLI mode."""
-    if args.config_file:
-        ignored_cli_args = _cli_args_used_alongside_config(args)
-        if ignored_cli_args:
-            print(
-                "Warning: --config-file provided; CLI arguments not in config will be ignored: "
-                + ", ".join(ignored_cli_args)
-            )
-
-        config = load_tree_parser_config(args.config_file)
-        return argparse.Namespace(**config)
-
-    payload = {
-        "species_tree_path": args.species_tree,
-        "gene_trees_path": args.gene_trees,
-        "outgroup": args.outgroup,
-        "triplet_filter": args.triplet_filter,
-        "output_folder": args.output,
-        "processes": args.processes,
-        "no_multiprocessing": args.no_multiprocessing,
-    }
-    config = normalize_tree_parser_payload(payload)
-    return argparse.Namespace(**config)
+    return resolve_cli_or_config_args(
+        args,
+        load_config=load_tree_parser_config,
+        normalize_payload=normalize_tree_parser_payload,
+        payload_arg_names=TREE_PARSER_PAYLOAD_ARG_NAMES,
+    )
 
 
 if __name__ == "__main__":
