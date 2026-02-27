@@ -5,7 +5,7 @@ GhostParser Figure 6 for rooted species triplets:
 
 1. Classify each triplet gene tree as concordant/dis1/dis2.
 2. Compute tree height statistic ``H(T)`` as average root-to-tip distance.
-3. Run discordant count test (Pearson chi-square test, alpha=0.01).
+3. Run discordant count test (default: two-proportion z-test, alpha=0.01).
 4. If significant, run tree height test (two-sample KS, alpha=0.05).
 5. If significant, compare selected summary values to classify inflow vs ghost introgression.
 
@@ -13,8 +13,8 @@ Concordant topology is defined as the species-tree topology for the ABC triplet.
 The two discordant topologies are frequency-ranked as ``dis1`` (more frequent)
 and ``dis2`` (less frequent), with deterministic first-discordant tie-breaking.
 
-The discordant count test is configurable: Pearson chi-square (default) or
-two-proportion z-test.
+The discordant count test is configurable: two-proportion z-test (default) or
+Pearson chi-square.
 """
 
 from __future__ import annotations
@@ -29,8 +29,22 @@ from pathlib import Path
 
 import dendropy
 from scipy import stats
+from statsmodels.stats.proportion import proportions_ztest
 
-from .config import ConfigError, load_triplet_processor_config
+from .config import (
+    ConfigError,
+    DEFAULT_ALPHA_DCT,
+    DEFAULT_ALPHA_KS,
+    DEFAULT_DISCORDANT_TEST,
+    DEFAULT_PROCESSES,
+    DEFAULT_STATS_BACKEND,
+    DEFAULT_SUMMARY_STATISTIC,
+    DISCORDANT_TEST_CHOICES,
+    STATS_BACKEND_CHOICES,
+    SUMMARY_STATISTIC_CHOICES,
+    load_triplet_processor_config,
+    normalize_triplet_processor_payload,
+)
 from .triplet_utils import (
     ALL_TOPOLOGIES,
     TOPOLOGY_AB,
@@ -43,10 +57,6 @@ from .triplet_utils import (
 
 Classification = str
 SerializedTripletObservation = tuple[str, float]
-DISCORDANT_TEST_CHOICES = ("chi-square", "z-test")
-SUMMARY_STATISTIC_CHOICES = ("mean", "median")
-
-
 @dataclass(frozen=True)
 class TripletPipelineResult:
     """Result of running the GhostParser pipeline for one rooted species triplet."""
@@ -212,6 +222,20 @@ def _pearson_discordant_chi_square_test_scipy(n_dis1, n_dis2):
     return float(result.statistic), float(result.pvalue)
 
 
+def _two_proportion_discordant_z_test_statsmodels(n_dis1, n_dis2):
+    """Standard-library two-proportion z-test via statsmodels."""
+    total = n_dis1 + n_dis2
+    if total == 0:
+        return 0.0, 1.0
+
+    z_score, p_value = proportions_ztest(
+        count=[n_dis1, n_dis2],
+        nobs=[total, total],
+        alternative="two-sided",
+    )
+    return float(z_score), float(p_value)
+
+
 def two_proportion_discordant_z_test(n_dis1, n_dis2):
     """Two-proportion z-test for discordant count imbalance.
 
@@ -234,13 +258,36 @@ def two_proportion_discordant_z_test(n_dis1, n_dis2):
     return float(z_score), float(p_value)
 
 
-def run_discordant_count_test(n_dis1, n_dis2, method="chi-square"):
+def run_discordant_count_test(n_dis1, n_dis2, method="chi-square", stats_backend="custom"):
     """Run selected discordant count test and return (statistic, p-value)."""
+    if stats_backend not in STATS_BACKEND_CHOICES:
+        raise ValueError(
+            f"Unsupported stats backend: {stats_backend}. "
+            f"Choose one of: {', '.join(STATS_BACKEND_CHOICES)}"
+        )
+
     if method == "chi-square":
+        if stats_backend == "standard":
+            return _pearson_discordant_chi_square_test_scipy(n_dis1, n_dis2)
         return pearson_discordant_chi_square_test(n_dis1, n_dis2)
     if method == "z-test":
+        if stats_backend == "standard":
+            return _two_proportion_discordant_z_test_statsmodels(n_dis1, n_dis2)
         return two_proportion_discordant_z_test(n_dis1, n_dis2)
     raise ValueError(f"Unsupported discordant test method: {method}")
+
+
+def run_two_sample_ks_test(sample_a, sample_b, stats_backend="custom"):
+    """Run selected two-sample KS backend and return (statistic, p-value)."""
+    if stats_backend not in STATS_BACKEND_CHOICES:
+        raise ValueError(
+            f"Unsupported stats backend: {stats_backend}. "
+            f"Choose one of: {', '.join(STATS_BACKEND_CHOICES)}"
+        )
+
+    if stats_backend == "standard":
+        return _two_sample_ks_test_scipy(sample_a, sample_b)
+    return two_sample_ks_test(sample_a, sample_b)
 
 
 def two_sample_ks_test(sample_a, sample_b):
@@ -403,10 +450,11 @@ def _serialize_triplet_gene_trees(species_triplet, triplet_gene_trees):
 def _run_triplet_pipeline_from_observations(
     species_triplet,
     observations,
-    alpha_dct=0.01,
-    alpha_ks=0.05,
-    discordant_test="chi-square",
-    summary_statistic="mean",
+    alpha_dct=DEFAULT_ALPHA_DCT,
+    alpha_ks=DEFAULT_ALPHA_KS,
+    discordant_test=DEFAULT_DISCORDANT_TEST,
+    summary_statistic=DEFAULT_SUMMARY_STATISTIC,
+    stats_backend=DEFAULT_STATS_BACKEND,
     species_topology=TOPOLOGY_AB,
     species_tree_newick=None,
     rng=None,
@@ -439,7 +487,12 @@ def _run_triplet_pipeline_from_observations(
             f"Choose one of: {', '.join(SUMMARY_STATISTIC_CHOICES)}"
         )
 
-    dct_statistic, dct_p_value = run_discordant_count_test(n_dis1, n_dis2, method=discordant_test)
+    dct_statistic, dct_p_value = run_discordant_count_test(
+        n_dis1,
+        n_dis2,
+        method=discordant_test,
+        stats_backend=stats_backend,
+    )
     dct_significant = dct_p_value <= alpha_dct
     dct_chi_statistics = dct_statistic if discordant_test == "chi-square" else None
     dct_z_score = dct_statistic if discordant_test == "z-test" else None
@@ -473,7 +526,11 @@ def _run_triplet_pipeline_from_observations(
             analyzed_trees=analyzed_trees,
         )
 
-    ks_statistic, ks_p_value = two_sample_ks_test(heights[dis1_topology], heights[con_topology])
+    ks_statistic, ks_p_value = run_two_sample_ks_test(
+        heights[dis1_topology],
+        heights[con_topology],
+        stats_backend=stats_backend,
+    )
     ks_significant = ks_p_value <= alpha_ks
 
     if not ks_significant:
@@ -553,10 +610,11 @@ def _run_triplet_pipeline_from_observations(
 def run_triplet_pipeline(
     species_triplet,
     triplet_gene_trees,
-    alpha_dct=0.01,
-    alpha_ks=0.05,
-    discordant_test="chi-square",
-    summary_statistic="mean",
+    alpha_dct=DEFAULT_ALPHA_DCT,
+    alpha_ks=DEFAULT_ALPHA_KS,
+    discordant_test=DEFAULT_DISCORDANT_TEST,
+    summary_statistic=DEFAULT_SUMMARY_STATISTIC,
+    stats_backend=DEFAULT_STATS_BACKEND,
     species_topology=TOPOLOGY_AB,
     species_tree_newick=None,
     rng=None,
@@ -571,6 +629,7 @@ def run_triplet_pipeline(
         alpha_ks: Significance threshold for THT (KS test).
         discordant_test: Discordant count test method (`chi-square` or `z-test`).
         summary_statistic: Statistic used after KS for con/dis1 distributions (`mean` or `median`).
+        stats_backend: Statistical backend for DCT/KS (`custom` or `standard`).
         species_topology: Species-tree topology string for this triplet.
         species_tree_newick: Species-tree triplet Newick string for this triplet.
         rng: Optional randomizer for tie-breaking topology ranks.
@@ -586,6 +645,7 @@ def run_triplet_pipeline(
         alpha_ks=alpha_ks,
         discordant_test=discordant_test,
         summary_statistic=summary_statistic,
+        stats_backend=stats_backend,
         species_topology=species_topology,
         species_tree_newick=species_tree_newick,
         rng=rng,
@@ -672,7 +732,7 @@ def _resolve_processes(processes):
 
 def _analyze_triplet_entry(args):
     """Analyze one triplet map entry in a worker process."""
-    triplet, entry, alpha_dct, alpha_ks, discordant_test, summary_statistic = args
+    triplet, entry, alpha_dct, alpha_ks, discordant_test, summary_statistic, stats_backend = args
     species_topology = _species_topology_from_newick(entry.get("species_tree"), triplet)
     observations = _serialize_triplet_gene_trees(triplet, entry["gene_trees"])
     return _run_triplet_pipeline_from_observations(
@@ -682,6 +742,7 @@ def _analyze_triplet_entry(args):
         alpha_ks=alpha_ks,
         discordant_test=discordant_test,
         summary_statistic=summary_statistic,
+        stats_backend=stats_backend,
         species_topology=species_topology,
         species_tree_newick=entry.get("species_tree"),
     )
@@ -689,10 +750,11 @@ def _analyze_triplet_entry(args):
 
 def analyze_triplet_gene_tree_file(
     filepath,
-    alpha_dct=0.01,
-    alpha_ks=0.05,
-    discordant_test="chi-square",
-    summary_statistic="mean",
+    alpha_dct=DEFAULT_ALPHA_DCT,
+    alpha_ks=DEFAULT_ALPHA_KS,
+    discordant_test=DEFAULT_DISCORDANT_TEST,
+    summary_statistic=DEFAULT_SUMMARY_STATISTIC,
+    stats_backend=DEFAULT_STATS_BACKEND,
     rng=None,
     use_multiprocessing=True,
     processes=None,
@@ -710,6 +772,12 @@ def analyze_triplet_gene_tree_file(
             f"Choose one of: {', '.join(SUMMARY_STATISTIC_CHOICES)}"
         )
 
+    if stats_backend not in STATS_BACKEND_CHOICES:
+        raise ValueError(
+            f"Unsupported stats backend: {stats_backend}. "
+            f"Choose one of: {', '.join(STATS_BACKEND_CHOICES)}"
+        )
+
     triplet_map = parse_triplet_gene_trees_file(filepath)
     items = list(triplet_map.items())
     if not items:
@@ -721,7 +789,7 @@ def analyze_triplet_gene_tree_file(
 
     if use_multiprocessing and worker_count > 1 and rng is None:
         args = [
-            (triplet, entry, alpha_dct, alpha_ks, discordant_test, summary_statistic)
+            (triplet, entry, alpha_dct, alpha_ks, discordant_test, summary_statistic, stats_backend)
             for triplet, entry in items
         ]
         chunksize = max(1, len(args) // (worker_count * 4))
@@ -740,6 +808,7 @@ def analyze_triplet_gene_tree_file(
                 alpha_ks=alpha_ks,
                 discordant_test=discordant_test,
                 summary_statistic=summary_statistic,
+                stats_backend=stats_backend,
                 species_topology=species_topology,
                 species_tree_newick=entry.get("species_tree"),
                 rng=rng,
@@ -835,6 +904,7 @@ def main():
         alpha_ks=args.alpha_ks,
         discordant_test=args.discordant_test,
         summary_statistic=args.summary_statistic,
+        stats_backend=args.stats_backend,
         use_multiprocessing=not args.no_multiprocessing,
         processes=args.processes,
     )
@@ -864,20 +934,26 @@ def _build_argument_parser():
     parser.add_argument(
         "--discordant-test",
         choices=DISCORDANT_TEST_CHOICES,
-        default="chi-square",
-        help="Discordant count test to use (default: chi-square)",
+        default=None,
+        help=f"Discordant count test to use (default: {DEFAULT_DISCORDANT_TEST})",
     )
     parser.add_argument(
         "--summary-statistic",
         choices=SUMMARY_STATISTIC_CHOICES,
-        default="mean",
-        help="Statistic used for con/dis1 distributions after KS test (default: mean)",
+        default=None,
+        help=f"Statistic used for con/dis1 distributions after KS test (default: {DEFAULT_SUMMARY_STATISTIC})",
+    )
+    parser.add_argument(
+        "--stats-backend",
+        choices=STATS_BACKEND_CHOICES,
+        default=None,
+        help=f"Statistical backend for DCT/KS calculations (default: {DEFAULT_STATS_BACKEND})",
     )
     parser.add_argument(
         "-p",
         "--processes",
         type=int,
-        default=0,
+        default=DEFAULT_PROCESSES,
         help="Number of worker processes for triplet analysis (0 = all cores)",
     )
     parser.add_argument(
@@ -897,15 +973,17 @@ def _cli_args_used_alongside_config(args):
         provided.append("--output")
     if args.stats_output is not None:
         provided.append("--stats-output")
-    if args.alpha_dct != 0.01:
+    if args.alpha_dct != DEFAULT_ALPHA_DCT:
         provided.append("--alpha-dct")
-    if args.alpha_ks != 0.05:
+    if args.alpha_ks != DEFAULT_ALPHA_KS:
         provided.append("--alpha-ks")
-    if args.discordant_test != "chi-square":
+    if args.discordant_test is not None:
         provided.append("--discordant-test")
-    if args.summary_statistic != "mean":
+    if args.summary_statistic is not None:
         provided.append("--summary-statistic")
-    if args.processes != 0:
+    if args.stats_backend is not None:
+        provided.append("--stats-backend")
+    if args.processes != DEFAULT_PROCESSES:
         provided.append("--processes")
     if args.no_multiprocessing:
         provided.append("--no-multiprocessing")
@@ -923,32 +1001,22 @@ def _resolve_runtime_args(args):
             )
 
         config = load_triplet_processor_config(args.config_file)
-        return argparse.Namespace(
-            input=config["input"],
-            output=config.get("output"),
-            stats_output=config.get("stats_output"),
-            alpha_dct=0.01 if config.get("alpha_dct") is None else config.get("alpha_dct"),
-            alpha_ks=0.05 if config.get("alpha_ks") is None else config.get("alpha_ks"),
-            discordant_test=config.get("discordant_test") or "chi-square",
-            summary_statistic=config.get("summary_statistic") or "mean",
-            processes=config.get("processes", 0),
-            no_multiprocessing=bool(config.get("no_multiprocessing", False)),
-        )
+        return argparse.Namespace(**config)
 
-    if not args.input:
-        raise ValueError("Missing required CLI argument --input, or use --config-file.")
-
-    return argparse.Namespace(
-        input=args.input,
-        output=args.output,
-        stats_output=args.stats_output,
-        alpha_dct=args.alpha_dct,
-        alpha_ks=args.alpha_ks,
-        discordant_test=args.discordant_test,
-        summary_statistic=args.summary_statistic,
-        processes=args.processes,
-        no_multiprocessing=args.no_multiprocessing,
-    )
+    payload = {
+        "input_path": args.input,
+        "output_path": args.output,
+        "stats_output": args.stats_output,
+        "alpha_dct": args.alpha_dct,
+        "alpha_ks": args.alpha_ks,
+        "discordant_test": args.discordant_test,
+        "summary_statistic": args.summary_statistic,
+        "stats_backend": args.stats_backend,
+        "processes": args.processes,
+        "no_multiprocessing": args.no_multiprocessing,
+    }
+    config = normalize_triplet_processor_payload(payload)
+    return argparse.Namespace(**config)
 
 
 if __name__ == "__main__":
