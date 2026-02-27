@@ -56,7 +56,7 @@ def test_resolve_runtime_args_tree_parser_cli_defaults():
     resolved = _resolve_runtime_args(args)
     assert resolved.species_tree == "species.nwk"
     assert resolved.gene_trees == "genes.nwk"
-    assert resolved.outgroup == "Out1,Out2"
+    assert resolved.outgroup == ["Out1", "Out2"]
     assert resolved.min_support_value == 0.5
 
 
