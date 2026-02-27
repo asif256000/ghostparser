@@ -6,9 +6,9 @@
   "processes": 0,
   "triplet_filter": "data/asuv21/asuv_all/triplet_filter.txt",
   "min_support_value": 0.5,
-  "discordant_test": "z-test",
+  "discordant_test": "chi-square",
   "summary_statistic": "median",
-  "stats_backend": "custom",
+  "stats_backend": "standard",
   "alpha_dct": 0.01,
   "alpha_ks": 0.05
 }
