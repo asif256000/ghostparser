@@ -26,6 +26,7 @@ def test_load_orchestrator_config_json(tmp_path):
                 "min_support_value": 0.7,
                 "discordant_test": "z-test",
                 "summary_statistic": "median",
+                "stats_backend": "standard",
                 "alpha_dct": 0.02,
                 "alpha_ks": 0.1,
             }
@@ -43,6 +44,7 @@ def test_load_orchestrator_config_json(tmp_path):
     assert config["min_support_value"] == 0.7
     assert config["discordant_test"] == "z-test"
     assert config["summary_statistic"] == "median"
+    assert config["stats_backend"] == "standard"
     assert config["alpha_dct"] == 0.02
     assert config["alpha_ks"] == 0.1
 
@@ -103,6 +105,23 @@ def test_load_orchestrator_config_invalid_summary_statistic(tmp_path):
     )
 
     with pytest.raises(ConfigError, match="summary_statistic"):
+        load_orchestrator_config(str(config_path))
+
+
+def test_load_orchestrator_config_invalid_stats_backend(tmp_path):
+    config_path = tmp_path / "bad_stats_backend.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "species_tree_path": "species.nwk",
+                "gene_trees_path": "genes.nwk",
+                "outgroup": "OutA",
+                "stats_backend": "numpy",
+            }
+        )
+    )
+
+    with pytest.raises(ConfigError, match="stats_backend"):
         load_orchestrator_config(str(config_path))
 
 
@@ -196,6 +215,7 @@ def test_load_triplet_processor_config_json(tmp_path):
                 "alpha_ks": 0.1,
                 "discordant_test": "z-test",
                 "summary_statistic": "median",
+                "stats_backend": "standard",
                 "processes": 3,
                 "no_multiprocessing": False,
             }
@@ -211,8 +231,24 @@ def test_load_triplet_processor_config_json(tmp_path):
     assert config["alpha_ks"] == 0.1
     assert config["discordant_test"] == "z-test"
     assert config["summary_statistic"] == "median"
+    assert config["stats_backend"] == "standard"
     assert config["processes"] == 3
     assert config["no_multiprocessing"] is False
+
+
+def test_load_triplet_processor_config_invalid_stats_backend(tmp_path):
+    config_path = tmp_path / "triplet_processor_bad_stats_backend.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "input_path": "unique_triplets_gene_trees.txt",
+                "stats_backend": "numpy",
+            }
+        )
+    )
+
+    with pytest.raises(ConfigError, match="stats_backend"):
+        load_triplet_processor_config(str(config_path))
 
 
 def test_load_triplet_processor_config_missing_input(tmp_path):
