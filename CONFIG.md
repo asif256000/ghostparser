@@ -81,13 +81,13 @@ python -m ghostparser.triplet_processor -c sample_configs/triplet_processor_mini
   - Default behavior when omitted is equivalent to `0.5`.
 - `discordant_test` (string)
   - Discordant count test method used by `triplet_processor` stage.
-  - Allowed values: `z-test` (default), `chi-square`.
+  - Allowed values: `chi-square` (default), `z-test`.
 - `summary_statistic` (string)
   - Statistic used for con/dis1 distributions after KS test.
   - Allowed values: `median` (default), `mean`.
 - `stats_backend` (string)
   - Statistical backend used for DCT and KS computations.
-  - Allowed values: `custom` (default), `standard`.
+  - Allowed values: `standard` (default), `custom`.
   - `custom` uses GhostParser manual statistical implementations.
   - `standard` uses SciPy for chi-square/KS and statsmodels for two-proportion z-test.
 - `alpha_dct` (number)
@@ -164,12 +164,12 @@ See examples in:
 - `alpha_ks` (number)
   - Default: `0.05`.
 - `discordant_test` (string)
-  - Allowed values: `z-test` (default), `chi-square`.
+  - Allowed values: `chi-square` (default), `z-test`.
 - `summary_statistic` (string)
   - Allowed values: `median` (default), `mean`.
 - `stats_backend` (string)
   - Statistical backend used for DCT and KS computations.
-  - Allowed values: `custom` (default), `standard`.
+  - Allowed values: `standard` (default), `custom`.
   - `custom` uses GhostParser manual statistical implementations.
   - `standard` uses SciPy for chi-square/KS and statsmodels for two-proportion z-test.
 - `processes` (integer >= 0)
