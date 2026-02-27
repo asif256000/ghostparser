@@ -25,6 +25,8 @@ python -m ghostparser.orchestrator \
 
 If both `-c/--config-file` and other CLI args are provided, config mode is used and the other CLI args are ignored with a warning.
 
+CLI mode internally normalizes provided flags into the same key/value configuration payload used by config files, so validation and defaults are consistent across both modes.
+
 `tree_parser` config-file mode:
 
 ```bash
@@ -79,10 +81,15 @@ python -m ghostparser.triplet_processor -c sample_configs/triplet_processor_mini
   - Default behavior when omitted is equivalent to `0.5`.
 - `discordant_test` (string)
   - Discordant count test method used by `triplet_processor` stage.
-  - Allowed values: `chi-square` (default), `z-test`.
+  - Allowed values: `z-test` (default), `chi-square`.
 - `summary_statistic` (string)
   - Statistic used for con/dis1 distributions after KS test.
-  - Allowed values: `mean` (default), `median`.
+  - Allowed values: `median` (default), `mean`.
+- `stats_backend` (string)
+  - Statistical backend used for DCT and KS computations.
+  - Allowed values: `custom` (default), `standard`.
+  - `custom` uses GhostParser manual statistical implementations.
+  - `standard` uses SciPy for chi-square/KS and statsmodels for two-proportion z-test.
 - `alpha_dct` (number)
   - P-value threshold for the discordant count test.
   - Default: `0.01`.
@@ -157,9 +164,14 @@ See examples in:
 - `alpha_ks` (number)
   - Default: `0.05`.
 - `discordant_test` (string)
-  - Allowed values: `chi-square` (default), `z-test`.
+  - Allowed values: `z-test` (default), `chi-square`.
 - `summary_statistic` (string)
-  - Allowed values: `mean` (default), `median`.
+  - Allowed values: `median` (default), `mean`.
+- `stats_backend` (string)
+  - Statistical backend used for DCT and KS computations.
+  - Allowed values: `custom` (default), `standard`.
+  - `custom` uses GhostParser manual statistical implementations.
+  - `standard` uses SciPy for chi-square/KS and statsmodels for two-proportion z-test.
 - `processes` (integer >= 0)
   - Worker count for triplet inference (`0` = all cores).
 - `no_multiprocessing` (boolean)
