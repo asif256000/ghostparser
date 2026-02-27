@@ -11,15 +11,17 @@ from Bio import Phylo
 from Bio.Phylo.BaseTree import Clade, Tree
 import dendropy
 
-from .config import ConfigError, load_tree_parser_config
+from .config import (
+    ConfigError,
+    DEFAULT_MIN_SUPPORT_VALUE,
+    DEFAULT_PROCESSES,
+    load_tree_parser_config,
+    normalize_tree_parser_payload,
+)
 from .triplet_utils import (
     find_sister_pair,
     normalize_abc_from_sister_pair,
 )
-
-
-DEFAULT_PROCESSES = 0
-DEFAULT_MIN_SUPPORT_VALUE = 0.5
 
 
 def read_tree_file(filepath):
@@ -1132,33 +1134,19 @@ def _resolve_runtime_args(args):
             )
 
         config = load_tree_parser_config(args.config_file)
-        return argparse.Namespace(
-            species_tree=config["species_tree"],
-            gene_trees=config["gene_trees"],
-            outgroup=config["outgroup"],
-            triplet_filter=config.get("triplet_filter"),
-            output=config.get("output"),
-            processes=config.get("processes", DEFAULT_PROCESSES),
-            no_multiprocessing=bool(config.get("no_multiprocessing", False)),
-            min_support_value=config.get("min_support_value"),
-        )
+        return argparse.Namespace(**config)
 
-    if not args.species_tree or not args.gene_trees or not args.outgroup:
-        raise ValueError(
-            "Missing required CLI arguments. Provide --species_tree, --gene_trees, and --outgroup, "
-            "or use --config-file."
-        )
-
-    return argparse.Namespace(
-        species_tree=args.species_tree,
-        gene_trees=args.gene_trees,
-        outgroup=args.outgroup,
-        triplet_filter=args.triplet_filter,
-        output=args.output,
-        processes=args.processes,
-        no_multiprocessing=args.no_multiprocessing,
-        min_support_value=DEFAULT_MIN_SUPPORT_VALUE,
-    )
+    payload = {
+        "species_tree_path": args.species_tree,
+        "gene_trees_path": args.gene_trees,
+        "outgroup": args.outgroup,
+        "triplet_filter": args.triplet_filter,
+        "output_folder": args.output,
+        "processes": args.processes,
+        "no_multiprocessing": args.no_multiprocessing,
+    }
+    config = normalize_tree_parser_payload(payload)
+    return argparse.Namespace(**config)
 
 
 if __name__ == "__main__":
