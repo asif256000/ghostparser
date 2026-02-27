@@ -42,18 +42,25 @@ def test_resolve_runtime_args_cli_defaults(tmp_path, monkeypatch):
         triplet_filter=None,
         output=str(tmp_path / "results"),
         processes=0,
+        min_support_value=None,
+        discordant_test=None,
+        summary_statistic=None,
+        stats_backend=None,
+        alpha_dct=None,
+        alpha_ks=None,
     )
 
     resolved = _resolve_runtime_args(args)
 
     assert resolved.species_tree == "species.nwk"
     assert resolved.gene_trees == "genes.nwk"
-    assert resolved.outgroup == "Out1,Out2"
+    assert resolved.outgroup == ["Out1", "Out2"]
     assert resolved.output == str(tmp_path / "results")
     assert resolved.processes == 0
-    assert resolved.min_support_value is None
-    assert resolved.discordant_test == "chi-square"
-    assert resolved.summary_statistic == "mean"
+    assert resolved.min_support_value == 0.5
+    assert resolved.discordant_test == "z-test"
+    assert resolved.summary_statistic == "median"
+    assert resolved.stats_backend == "custom"
     assert resolved.alpha_dct == 0.01
     assert resolved.alpha_ks == 0.05
 
@@ -68,6 +75,12 @@ def test_resolve_runtime_args_cli_custom_processes_preserved(tmp_path, monkeypat
         triplet_filter=None,
         output=str(tmp_path / "results"),
         processes=5,
+        min_support_value=None,
+        discordant_test=None,
+        summary_statistic=None,
+        stats_backend=None,
+        alpha_dct=None,
+        alpha_ks=None,
     )
 
     resolved = _resolve_runtime_args(args)
@@ -88,6 +101,12 @@ def test_resolve_runtime_args_config_with_cli_warns_and_ignores(tmp_path, capsys
         triplet_filter=None,
         output=str(tmp_path / "results"),
         processes=7,
+        min_support_value=0.9,
+        discordant_test="chi-square",
+        summary_statistic="mean",
+        stats_backend="standard",
+        alpha_dct=0.2,
+        alpha_ks=0.3,
     )
 
     resolved = _resolve_runtime_args(args)
@@ -98,8 +117,9 @@ def test_resolve_runtime_args_config_with_cli_warns_and_ignores(tmp_path, capsys
     assert resolved.gene_trees == "g.nwk"
     assert resolved.outgroup == ["OutA"]
     assert resolved.processes == 0
-    assert resolved.discordant_test == "chi-square"
-    assert resolved.summary_statistic == "mean"
+    assert resolved.discordant_test == "z-test"
+    assert resolved.summary_statistic == "median"
+    assert resolved.stats_backend == "custom"
     assert resolved.alpha_dct == 0.01
     assert resolved.alpha_ks == 0.05
 
@@ -118,6 +138,12 @@ def test_resolve_runtime_args_config_processes_preserved_when_set(tmp_path):
         triplet_filter=None,
         output=str(tmp_path / "results"),
         processes=0,
+        min_support_value=None,
+        discordant_test=None,
+        summary_statistic=None,
+        stats_backend=None,
+        alpha_dct=None,
+        alpha_ks=None,
     )
 
     resolved = _resolve_runtime_args(args)
