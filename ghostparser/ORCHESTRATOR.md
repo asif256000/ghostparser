@@ -39,7 +39,7 @@ Options:
   - Worker processes for both triplet extraction (`tree_parser`) and per-triplet inference (`triplet_processor`).
   - Defaults to `0`, which means all available CPU cores (`cpu_count()`).
 
-`min_support_value` is supported via config file only (optional). If omitted, default tree-parser threshold behavior is used.
+CLI mode inputs are normalized into the same key/value payload used by config files, so defaults and validation are consistent across both modes.
 
 ## Pipeline Summary
 
@@ -121,9 +121,9 @@ Canonical topology strings:
   - Otherwise left empty.
 
 - `dct_p_value`
-  - Method: configurable discordant test on (`n_dis1`, `n_dis2`):
-    - `chi-square` (default): `scipy.stats.chisquare`
-    - `z-test`: two-proportion z-test
+  - Method: configurable discordant test on (`n_dis1`, `n_dis2`), using selected backend (`custom` default, `standard` optional):
+    - `z-test` (default): custom manual z-test in `custom`, statsmodels two-proportion z-test in `standard`
+    - `chi-square`: custom chi-square in `custom`, SciPy chi-square in `standard`
 
 - `dct_significant`
   - Method: `dct_p_value <= alpha_dct` (`alpha_dct` default `0.01`).
@@ -139,7 +139,7 @@ Per-gene-tree height uses:
   - Method: two-sample KS statistic between height samples of `dis1_topology` vs `con_topology`.
 
 - `ks_p_value`
-  - Method: p-value from `scipy.stats.ks_2samp` (two-sided).
+  - Method: p-value from selected backend (`custom` default, `standard` optional) for two-sided KS.
 
 - `ks_significant`
   - Method: `ks_p_value <= alpha_ks` (`alpha_ks` default `0.05`).
@@ -147,7 +147,7 @@ Per-gene-tree height uses:
 ### Height Summary Values and Final Classification
 
 - `summary_statistic`
-  - Method: records which summary function is used for height comparison (`mean` by default, or `median` when configured).
+  - Method: records which summary function is used for height comparison (`median` by default, or `mean` when configured).
   - This controls the values written to `summary_con` and `summary_dis`.
 
 - `summary_con`
