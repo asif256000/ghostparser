@@ -1,10 +1,16 @@
 # Ghostparser Module Documentation
 
-Detailed documentation for the `ghostparser.tree_parser` and `ghostparser.triplet_processor` modules.
+Detailed documentation for the GhostParser pipeline, centered on `ghostparser.orchestrator`, with `ghostparser.tree_parser` and `ghostparser.triplet_processor` as supporting submodules.
 
 ## Overview
 
-The ghostparser module processes phylogenetic trees in Newick format, standardizes them by removing support values, filters low-quality trees, and extracts triplet subtrees from gene trees for downstream ghost introgression analysis.
+GhostParser is an orchestrator-first pipeline:
+
+1. `orchestrator` coordinates the full run and output generation.
+2. `tree_parser` handles tree cleaning, outgroup rooting/pruning, and triplet extraction.
+3. `triplet_processor` performs per-triplet statistical inference and classification.
+
+The pipeline processes phylogenetic trees in Newick format, standardizes trees by removing support values, extracts triplet subtrees from gene trees, and runs the GhostParser decision path for introgression calls.
 
 When multiple outgroup taxa are provided (comma-separated), the species tree is rooted on their most recent common
 ancestor (MRCA) and the outgroup clade is pruned. Any additional taxa that fall inside the outgroup clade are
@@ -14,7 +20,7 @@ file.
 For very large datasets, triplet processing parallelizes over triplet chunks and streams gene trees from disk,
 keeping memory bounded to the active triplet chunk.
 
-The `triplet_processor` module consumes `unique_triplets_gene_trees.txt` and applies the Figure 6 decision pipeline:
+`triplet_processor` consumes `unique_triplets_gene_trees.txt` and applies the GhostParser decision pipeline:
 
 1. Set concordant topology to species topology, and rank only discordants by observed frequency (`dis1`, `dis2`).
 2. Compute `H(T)` as the average root-to-tip distance.
@@ -22,11 +28,43 @@ The `triplet_processor` module consumes `unique_triplets_gene_trees.txt` and app
 4. If significant, run two-sample KS tree-height test (alpha `alpha_ks`, default `0.05`).
 5. If significant, compare selected summary statistics (median by default, mean optional) to infer outflow vs ghost introgression.
 
+This is a configurable pipeline: users can choose supported statistical methods and thresholds while preserving the same core stage order.
+
 Triplet sections in `unique_triplets_gene_trees.txt` are written as:
 
 - `A,B,C<TAB>gene_tree_count<TAB>species_triplet_tree_newick`
 
 where `A` and `B` are species sisters for that triplet.
+
+## Orchestrator (Primary Entry Point)
+
+### Role
+
+`ghostparser.orchestrator` is the main pipeline interface. It executes preprocessing and inference in sequence and writes final orchestrator outputs.
+
+### CLI usage
+
+```bash
+python -m ghostparser.orchestrator -st <species_tree> -gt <gene_trees> -og <outgroup>
+```
+
+Config-file mode:
+
+```bash
+python -m ghostparser.orchestrator -c <config.yaml>
+```
+
+### Why the pipeline works
+
+- `tree_parser` produces rooted/cleaned species and gene trees plus normalized triplet blocks.
+- `triplet_processor` analyzes those triplet blocks with DCT + KS + summary-comparison logic.
+- `orchestrator` preserves one consistent runtime configuration path and final reporting format.
+
+### Primary orchestrator outputs
+
+- `unique_triplets_gene_trees.txt`
+- `orchestrator_triplet_results.tsv`
+- `metrics.txt`
 
 ## Triplet Processor Module (`ghostparser.triplet_processor`)
 
@@ -146,7 +184,9 @@ python -m ghostparser.tree_parser -c sample_configs/tree_parser_minimal.yaml
 
 When `-c/--config-file` is provided, other CLI options are ignored with a warning.
 
-## Module Functions
+## Tree Parser Module (`ghostparser.tree_parser`)
+
+### Module Functions
 
 ### Tree Reading and Validation
 
@@ -459,7 +499,7 @@ clean_name = get_clean_filename("species.tree")
 # Returns: "species_clean.tree"
 ```
 
-## Command Line Interface
+### Command Line Interface
 
 ### Main Entry Point
 
@@ -502,7 +542,7 @@ python -m ghostparser.tree_parser \
    -og OutGroup
 ```
 
-## Workflow Details
+### Workflow Details
 
 ### Complete Processing Pipeline
 
@@ -549,7 +589,7 @@ python -m ghostparser.tree_parser \
    - Total subtrees extracted
    - Average trees per triplet
 
-## Configuration
+### Configuration
 
 ### Support Threshold
 
@@ -563,12 +603,12 @@ Default: `10 decimal places`
 
 Branch lengths are preserved with high precision and trailing zeros are removed for cleaner output.
 
-## Dependencies
+### Dependencies
 
 - **BioPython (>=1.79)**: For Phylo module (tree parsing and manipulation)
 - **Python 3.x**: Uses f-strings, pathlib, type hints
 
-## Error Handling
+### Error Handling
 
 The module provides robust error handling:
 

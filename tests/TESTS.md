@@ -41,6 +41,25 @@ Reference-marked tests in `tests/test_triplet_processor.py`:
 - `test_standard_z_test_matches_statsmodels_reference_randomized`
 - `test_two_sample_ks_test_hybrid_uses_scipy_near_threshold`
 
+## Pipeline-First Coverage Map
+
+### Orchestrator (Primary Pipeline)
+
+- `tests/test_orchestrator.py` covers process resolution and unified CLI/config runtime argument behavior for the end-to-end pipeline entry point.
+- End-to-end orchestrator behavior is also exercised via integrated tree parsing + triplet inference flows covered in module tests.
+
+### Tree Parser (Submodule)
+
+- `tests/test_tree_parser.py` covers tree normalization, support filtering, outgroup handling, triplet extraction, and streaming/multiprocessing writers.
+
+### Triplet Processor (Submodule)
+
+- `tests/test_triplet_processor.py` covers DCT/KS/statistics logic, classification outputs, TSV/JSON writing, backend parity checks, and runtime argument resolution.
+
+### Config Loading (Cross-Cutting)
+
+- `tests/test_config.py` covers config parsing, required fields, defaults, and validation for orchestrator and both submodules.
+
 ## Shared Fixtures (`tests/fixtures.py`)
 
 - `simple_newick_file`

@@ -1,12 +1,8 @@
 # Configuration Guide
 
-This document describes configuration file support for:
+This guide is organized around the main pipeline entry point, `ghostparser.orchestrator`, and then the two submodules (`tree_parser`, `triplet_processor`).
 
-- `ghostparser.orchestrator`
-- `ghostparser.tree_parser`
-- `ghostparser.triplet_processor`
-
-## CLI Usage
+## Orchestrator-First Usage
 
 Run orchestrator with a config file:
 
@@ -27,7 +23,7 @@ If `-c/--config-file` and other CLI args are provided together, config mode is u
 
 CLI mode internally normalizes provided flags into the same key/value configuration payload used by config files, so validation and defaults are consistent across both modes.
 
-`tree_parser` config-file mode:
+Submodule config-file modes:
 
 ```bash
 python -m ghostparser.tree_parser -c sample_configs/tree_parser_minimal.yaml
@@ -41,7 +37,9 @@ python -m ghostparser.triplet_processor -c sample_configs/triplet_processor_mini
 
 ---
 
-## Supported Config Formats
+## Orchestrator Configuration (Primary)
+
+### Supported Formats
 
 - `.json`
 - `.yaml`
@@ -49,7 +47,7 @@ python -m ghostparser.triplet_processor -c sample_configs/triplet_processor_mini
 
 ---
 
-## Orchestrator Config Keys
+### Keys
 
 ### Required
 
@@ -97,9 +95,7 @@ python -m ghostparser.triplet_processor -c sample_configs/triplet_processor_mini
   - P-value threshold for KS tree-height test.
   - Default: `0.05`.
 
----
-
-## Sample Configs
+### Sample Configs
 
 See examples in:
 
@@ -107,9 +103,8 @@ See examples in:
 - `sample_configs/orchestrator_full.yaml`
 - `sample_configs/orchestrator_full.json`
 
----
 
-## Tree Parser Config Keys
+## Tree Parser Configuration (Submodule)
 
 ### Required
 
@@ -137,14 +132,13 @@ See examples in:
 - `no_multiprocessing` (boolean)
   - `true` forces single-worker extraction.
 
-### Tree Parser Sample Configs
+### Sample Configs
 
 - `sample_configs/tree_parser_minimal.yaml`
 - `sample_configs/tree_parser_full.yaml`
 
----
 
-## Triplet Processor Config Keys
+## Triplet Processor Configuration (Submodule)
 
 ### Required
 
@@ -177,7 +171,7 @@ See examples in:
 - `no_multiprocessing` (boolean)
   - `true` forces single-worker analysis.
 
-### Triplet Processor Sample Configs
+### Sample Configs
 
 - `sample_configs/triplet_processor_minimal.yaml`
 - `sample_configs/triplet_processor_full.yaml`
