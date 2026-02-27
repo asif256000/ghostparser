@@ -44,12 +44,12 @@ def _species_triplet_map(triplets):
 def test_resolve_runtime_args_tree_parser_cli_defaults():
     args = argparse.Namespace(
         config_file=None,
-        species_tree="species.nwk",
-        gene_trees="genes.nwk",
-        outgroup="Out1,Out2",
+        species_tree_path="species.nwk",
+        gene_trees_path="genes.nwk",
+        outgroups="Out1,Out2",
         triplet_filter=None,
-        output=None,
-        processes=0,
+        output_folder=None,
+        processes=None,
         no_multiprocessing=False,
     )
 
@@ -63,11 +63,11 @@ def test_resolve_runtime_args_tree_parser_cli_defaults():
 def test_resolve_runtime_args_tree_parser_cli_custom_processes_preserved():
     args = argparse.Namespace(
         config_file=None,
-        species_tree="species.nwk",
-        gene_trees="genes.nwk",
-        outgroup="Out1,Out2",
+        species_tree_path="species.nwk",
+        gene_trees_path="genes.nwk",
+        outgroups="Out1,Out2",
         triplet_filter=None,
-        output=None,
+        output_folder=None,
         processes=6,
         no_multiprocessing=False,
     )
@@ -93,12 +93,12 @@ def test_resolve_runtime_args_tree_parser_config_warns_and_ignores(tmp_path, cap
 
     args = argparse.Namespace(
         config_file=str(config_path),
-        species_tree="species.nwk",
-        gene_trees=None,
-        outgroup=None,
+        species_tree_path="species.nwk",
+        gene_trees_path=None,
+        outgroups=None,
         triplet_filter=None,
-        output=None,
-        processes=0,
+        output_folder=None,
+        processes=None,
         no_multiprocessing=False,
     )
 
@@ -128,11 +128,11 @@ def test_resolve_runtime_args_tree_parser_config_defaults_processes_to_zero(tmp_
 
     args = argparse.Namespace(
         config_file=str(config_path),
-        species_tree=None,
-        gene_trees=None,
-        outgroup=None,
+        species_tree_path=None,
+        gene_trees_path=None,
+        outgroups=None,
         triplet_filter=None,
-        output=None,
+        output_folder=None,
         processes=9,
         no_multiprocessing=False,
     )

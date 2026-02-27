@@ -630,15 +630,15 @@ def test_write_pipeline_results_rejects_mixed_summary_statistics(tmp_path):
 def test_resolve_runtime_args_triplet_processor_cli_defaults():
     args = argparse.Namespace(
         config_file=None,
-        input="unique_triplets_gene_trees.txt",
-        output=None,
+        input_path="unique_triplets_gene_trees.txt",
+        output_path=None,
         stats_output=None,
-        alpha_dct=0.01,
-        alpha_ks=0.05,
+        alpha_dct=None,
+        alpha_ks=None,
         discordant_test=None,
         summary_statistic=None,
         stats_backend=None,
-        processes=0,
+        processes=None,
         no_multiprocessing=False,
     )
 
@@ -654,11 +654,11 @@ def test_resolve_runtime_args_triplet_processor_cli_defaults():
 def test_resolve_runtime_args_triplet_processor_cli_custom_processes_preserved():
     args = argparse.Namespace(
         config_file=None,
-        input="unique_triplets_gene_trees.txt",
-        output=None,
+        input_path="unique_triplets_gene_trees.txt",
+        output_path=None,
         stats_output=None,
-        alpha_dct=0.01,
-        alpha_ks=0.05,
+        alpha_dct=None,
+        alpha_ks=None,
         discordant_test=None,
         summary_statistic=None,
         stats_backend=None,
@@ -686,15 +686,15 @@ def test_resolve_runtime_args_triplet_processor_config_warns_and_ignores(tmp_pat
 
     args = argparse.Namespace(
         config_file=str(config_path),
-        input="unique_triplets_gene_trees.txt",
-        output=None,
+        input_path="unique_triplets_gene_trees.txt",
+        output_path=None,
         stats_output=None,
-        alpha_dct=0.01,
-        alpha_ks=0.05,
+        alpha_dct=None,
+        alpha_ks=None,
         discordant_test="chi-square",
         summary_statistic="mean",
         stats_backend="custom",
-        processes=0,
+        processes=None,
         no_multiprocessing=False,
     )
 
@@ -722,15 +722,15 @@ def test_resolve_runtime_args_triplet_processor_config_processes_preserved_when_
 
     args = argparse.Namespace(
         config_file=str(config_path),
-        input=None,
-        output=None,
+        input_path=None,
+        output_path=None,
         stats_output=None,
-        alpha_dct=0.01,
-        alpha_ks=0.05,
+        alpha_dct=None,
+        alpha_ks=None,
         discordant_test="chi-square",
         summary_statistic="mean",
         stats_backend="custom",
-        processes=0,
+        processes=None,
         no_multiprocessing=False,
     )
 
@@ -750,11 +750,11 @@ def test_resolve_runtime_args_triplet_processor_config_defaults_processes_to_zer
 
     args = argparse.Namespace(
         config_file=str(config_path),
-        input=None,
-        output=None,
+        input_path=None,
+        output_path=None,
         stats_output=None,
-        alpha_dct=0.01,
-        alpha_ks=0.05,
+        alpha_dct=None,
+        alpha_ks=None,
         discordant_test="chi-square",
         summary_statistic="mean",
         stats_backend="custom",
