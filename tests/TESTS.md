@@ -22,7 +22,7 @@ pytest tests/test_tree_parser.py
 pytest tests/test_tree_parser.py::test_extract_triplet_subtree_all_taxa_present
 ```
 
-### Run reference tests (SciPy parity checks)
+### Run reference tests (external parity checks)
 
 ```bash
 pytest -m reference
@@ -36,7 +36,9 @@ pytest -m "not reference"
 
 Reference-marked tests in `tests/test_triplet_processor.py`:
 - `test_custom_chi_square_matches_scipy_reference_randomized`
+- `test_custom_z_test_matches_statsmodels_reference_randomized`
 - `test_custom_ks_matches_scipy_asymptotic_reference_randomized`
+- `test_standard_z_test_matches_statsmodels_reference_randomized`
 - `test_two_sample_ks_test_hybrid_uses_scipy_near_threshold`
 
 ## Shared Fixtures (`tests/fixtures.py`)
@@ -142,6 +144,7 @@ Reference-marked tests in `tests/test_triplet_processor.py`:
 - `test_pearson_discordant_chi_square_balanced_counts_not_significant`
 - `test_two_proportion_discordant_z_test_balanced_counts_not_significant`
 - `test_custom_chi_square_matches_scipy_reference_randomized`
+- `test_custom_z_test_matches_statsmodels_reference_randomized`
 - `test_custom_ks_matches_scipy_asymptotic_reference_randomized`
 - `test_run_triplet_pipeline_no_introgression_when_dct_not_significant`
 - `test_run_triplet_pipeline_inflow_when_ks_not_significant`
@@ -178,3 +181,138 @@ These tests cover topology classification, discordant-count statistics, KS behav
 - `test_load_triplet_processor_config_defaults_processes_to_zero`
 
 These tests confirm omitted `processes` defaults to `0`, explicit values are preserved, and config mode precedence is enforced.
+They also validate centralized default behavior resolved through normalization (including `discordant_test=z-test`, `summary_statistic=median`, and `stats_backend=custom`).
+
+## Complete Test Function Index
+
+### `tests/test_config.py`
+
+- `test_load_orchestrator_config_json`
+- `test_load_orchestrator_config_yaml`
+- `test_load_orchestrator_config_missing_required`
+- `test_load_orchestrator_config_invalid_discordant_test`
+- `test_load_orchestrator_config_invalid_summary_statistic`
+- `test_load_orchestrator_config_invalid_stats_backend`
+- `test_load_orchestrator_config_defaults_processes_to_zero`
+- `test_load_tree_parser_config_json`
+- `test_load_tree_parser_config_invalid_no_multiprocessing`
+- `test_load_tree_parser_config_defaults_processes_to_zero`
+- `test_load_triplet_processor_config_json`
+- `test_load_triplet_processor_config_invalid_stats_backend`
+- `test_load_triplet_processor_config_missing_input`
+- `test_load_triplet_processor_config_defaults_processes_to_zero`
+
+### `tests/test_orchestrator.py`
+
+- `test_resolve_processes_zero_uses_all_cores`
+- `test_resolve_parallel_mode`
+- `test_resolve_runtime_args_cli_defaults`
+- `test_resolve_runtime_args_cli_custom_processes_preserved`
+- `test_resolve_runtime_args_config_with_cli_warns_and_ignores`
+- `test_resolve_runtime_args_config_processes_preserved_when_set`
+
+### `tests/test_tree_parser.py`
+
+- `test_resolve_runtime_args_tree_parser_cli_defaults`
+- `test_resolve_runtime_args_tree_parser_cli_custom_processes_preserved`
+- `test_resolve_runtime_args_tree_parser_config_warns_and_ignores`
+- `test_resolve_runtime_args_tree_parser_config_defaults_processes_to_zero`
+- `test_read_tree_file_single_tree`
+- `test_read_tree_file_multiple_trees`
+- `test_read_tree_file_not_found`
+- `test_read_tree_file_invalid_newick`
+- `test_read_tree_file_random_text`
+- `test_read_tree_file_empty_file`
+- `test_calculate_average_support_with_values`
+- `test_calculate_average_support_no_values`
+- `test_remove_support_values`
+- `test_standardize_tree_removes_support`
+- `test_standardize_tree_preserves_branch_lengths`
+- `test_format_newick_with_precision_trailing_zeros`
+- `test_format_newick_with_precision_default_places`
+- `test_format_newick_with_custom_precision`
+- `test_write_clean_trees`
+- `test_write_clean_trees_multiple`
+- `test_clean_and_save_trees_filters_low_support`
+- `test_clean_and_save_trees_no_filters`
+- `test_clean_and_save_trees_creates_output_file`
+- `test_clean_and_save_gene_trees_discards_missing_outgroup`
+- `test_get_taxa_from_tree_correct_names`
+- `test_generate_triplets_count`
+- `test_generate_triplets_excludes_outgroup`
+- `test_generate_triplets_content`
+- `test_generate_triplets_large_set`
+- `test_write_triplets_to_file`
+- `test_write_triplets_to_file_empty`
+- `test_get_clean_filename_simple`
+- `test_get_clean_filename_different_extension`
+- `test_get_clean_filename_no_extension`
+- `test_integration_full_workflow`
+- `test_integration_triplets_workflow`
+- `test_extract_triplet_subtree_all_taxa_present`
+- `test_extract_triplet_subtree_missing_taxa`
+- `test_extract_triplet_subtree_preserves_branch_lengths`
+- `test_process_gene_trees_for_triplets`
+- `test_process_gene_trees_for_triplets_empty`
+- `test_write_triplet_gene_trees`
+- `test_write_triplet_gene_trees_includes_species_tree_header`
+- `test_write_triplet_gene_trees_empty_triplet`
+- `test_integration_full_triplet_extraction_workflow`
+- `test_write_triplet_gene_trees_multiprocess_with_workers`
+- `test_write_triplet_gene_trees_multiprocess_includes_species_header`
+- `test_metrics_logger_context_manager`
+- `test_metrics_logger_file_not_opened_before_enter`
+- `test_triplet_gene_trees_separator_format`
+- `test_multiprocessing_triplet_writer_handles_empty_triplets`
+- `test_generate_triplets_multiple_outgroups`
+- `test_generate_triplets_outgroup_comma_separated_with_spaces`
+- `test_read_triplet_filter_file_parses_valid_and_skips_invalid`
+- `test_filter_triplets_by_taxa_skips_missing_taxa`
+- `test_write_triplet_gene_trees_streaming`
+- `test_write_triplet_gene_trees_multiprocess_triplets_single_worker`
+- `test_write_triplet_gene_trees_multiprocess_accepts_list`
+- `test_build_species_triplet_metadata_normalizes_abc`
+- `test_format_newick_with_precision_triplet_parser`
+- `test_triplet_branch_lengths_match`
+- `test_triplet_collapse_consistency_dendropy_vs_biopython`
+
+### `tests/test_triplet_processor.py`
+
+- `test_compute_tree_height_statistic_matches_definition`
+- `test_classify_triplet_topology_string_for_all_three_topologies`
+- `test_classify_triplet_topology_labels_concordant_and_discordants`
+- `test_pearson_discordant_chi_square_balanced_counts_not_significant`
+- `test_two_proportion_discordant_z_test_balanced_counts_not_significant`
+- `test_custom_chi_square_matches_scipy_reference_randomized`
+- `test_custom_ks_matches_scipy_asymptotic_reference_randomized`
+- `test_run_triplet_pipeline_uses_species_concordant_and_frequency_ranked_discordants`
+- `test_run_triplet_pipeline_supports_z_test_for_discordant_counts`
+- `test_run_triplet_pipeline_supports_standard_stats_backend`
+- `test_standard_z_test_matches_statsmodels_reference_randomized`
+- `test_run_triplet_pipeline_supports_median_summary_statistic`
+- `test_run_triplet_pipeline_breaks_discordant_ties_by_first_topology`
+- `test_run_triplet_pipeline_no_introgression_when_dct_not_significant`
+- `test_run_triplet_pipeline_inflow_when_ks_not_significant`
+- `test_run_triplet_pipeline_outflow_when_con_summary_higher`
+- `test_run_triplet_pipeline_ghost_when_dis_summary_higher`
+- `test_parse_analyze_and_write_pipeline_roundtrip_with_species_header`
+- `test_analyze_triplet_gene_tree_file_with_multiprocessing`
+- `test_analyze_triplet_gene_tree_file_rejects_unknown_discordant_test`
+- `test_analyze_triplet_gene_tree_file_rejects_unknown_summary_statistic`
+- `test_analyze_triplet_gene_tree_file_rejects_unknown_stats_backend`
+- `test_two_sample_ks_test_hybrid_uses_scipy_near_threshold`
+- `test_two_sample_ks_test_hybrid_keeps_custom_when_not_borderline`
+- `test_two_sample_ks_test_hybrid_rejects_negative_margin`
+- `test_parse_triplet_gene_trees_file_requires_species_tree_column`
+- `test_parse_triplet_gene_trees_file_rejects_empty_species_tree`
+- `test_write_pipeline_results_includes_topology_columns`
+- `test_write_pipeline_results_marks_discordant_highest_freq`
+- `test_collect_triplet_statistics_returns_dict_list`
+- `test_write_pipeline_results_uses_dct_chi_statistic_column_for_chi_square`
+- `test_write_pipeline_results_uses_dct_z_score_column_for_z_test`
+- `test_write_pipeline_statistics_json`
+- `test_resolve_runtime_args_triplet_processor_cli_defaults`
+- `test_resolve_runtime_args_triplet_processor_cli_custom_processes_preserved`
+- `test_resolve_runtime_args_triplet_processor_config_warns_and_ignores`
+- `test_resolve_runtime_args_triplet_processor_config_processes_preserved_when_set`
+- `test_resolve_runtime_args_triplet_processor_config_defaults_processes_to_zero`
