@@ -58,9 +58,9 @@ def test_resolve_runtime_args_cli_defaults(tmp_path, monkeypatch):
     assert resolved.output == str(tmp_path / "results")
     assert resolved.processes == 0
     assert resolved.min_support_value == 0.5
-    assert resolved.discordant_test == "z-test"
+    assert resolved.discordant_test == "chi-square"
     assert resolved.summary_statistic == "median"
-    assert resolved.stats_backend == "custom"
+    assert resolved.stats_backend == "standard"
     assert resolved.alpha_dct == 0.01
     assert resolved.alpha_ks == 0.05
 
@@ -117,9 +117,9 @@ def test_resolve_runtime_args_config_with_cli_warns_and_ignores(tmp_path, capsys
     assert resolved.gene_trees == "g.nwk"
     assert resolved.outgroup == ["OutA"]
     assert resolved.processes == 0
-    assert resolved.discordant_test == "z-test"
+    assert resolved.discordant_test == "chi-square"
     assert resolved.summary_statistic == "median"
-    assert resolved.stats_backend == "custom"
+    assert resolved.stats_backend == "standard"
     assert resolved.alpha_dct == 0.01
     assert resolved.alpha_ks == 0.05
 
