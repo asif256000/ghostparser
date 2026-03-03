@@ -35,29 +35,25 @@ poetry run python -m ghostparser.orchestrator -c run_config.yaml
 
 ### Installation from Wheel (Recommended for Users)
 
-For distribution to users who want to run the tool anywhere without cloning the repository:
+Pre-built wheel distributions are automatically created and published when a release is tagged. Users can download and install them without building locally.
 
-**Building the wheel:**
+**Downloading the wheel from GitHub:**
 
-```bash
-# Install build tool
-pip install build
-
-# Build wheel and source distribution
-python -m build
-
-# Creates: dist/ghostparser-0.1.0-py3-none-any.whl
-#          dist/ghostparser-0.1.0.tar.gz
-```
+1. Visit the [Releases page](https://github.com/asif256000/ghostparser/releases)
+2. Find the latest release (e.g., `v0.1.0`)
+3. Download the `.whl` file (e.g., `ghostparser-0.1.0-py3-none-any.whl`)
 
 **Installing from wheel:**
 
 ```bash
-# Users can install from the wheel file
+# Install from downloaded wheel file
 pip install ghostparser-0.1.0-py3-none-any.whl
 
-# Or install directly from GitHub releases
+# OR install directly from GitHub releases URL
 pip install https://github.com/asif256000/ghostparser/releases/download/v0.1.0/ghostparser-0.1.0-py3-none-any.whl
+
+# OR install from source distribution
+pip install https://github.com/asif256000/ghostparser/releases/download/v0.1.0/ghostparser-0.1.0.tar.gz
 ```
 
 **After installation, users can run from any directory:**
@@ -92,7 +88,7 @@ CLI mode with explicit worker count:
 python -m ghostparser.orchestrator -st species.tree -gt genes.tree -og OutGroup --processes 0
 ```
 
-### Why this pipeline works
+### How this pipeline works
 
 - `tree_parser` standardizes species/gene trees, roots on outgroup(s), and writes triplet-specific gene-tree blocks.
 - `triplet_processor` applies the GhostParser statistical decision pipeline to each triplet block.
