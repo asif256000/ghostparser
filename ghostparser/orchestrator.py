@@ -229,7 +229,8 @@ def main():
                 )
 
             species_trees = read_tree_file(species_tree_clean)
-            metrics.log(f"  Time taken: {time.time() - species_start:.2f}s")
+            species_time = time.time() - species_start
+            metrics.log(f"  Time taken: {species_time:.2f}s")
         except Exception as exc:
             metrics.log(f"✗ Error processing species tree: {exc}")
             return
@@ -317,16 +318,20 @@ def main():
                 metrics.log(
                     f"  ⚠ Dropped {len(dropped_genes)} tree(s) with avg support < {support_threshold}"
                 )
-            metrics.log(f"  Time taken: {time.time() - genes_start:.2f}s")
+            genes_time = time.time() - genes_start
+            metrics.log(f"  Time taken: {genes_time:.2f}s")
         except Exception as exc:
             metrics.log(f"✗ Error processing gene trees: {exc}")
             return
 
         processes, use_multiprocessing = _resolve_parallel_mode(args.processes)
+        metrics.log(f"\nNumber of parallel cores being utilized: {processes}")
+        metrics.log("")
 
         try:
-            metrics.log("\n✓ Running staged triplet extraction + introgression inference...")
-            infer_start = time.time()
+            # Stage 1: Triplet Extraction
+            metrics.log("✓ Starting triplet extraction stage...")
+            extraction_start = time.time()
 
             triplet_output_path = str(output_dir / "unique_triplets_gene_trees.txt")
             total_subtrees, triplets_with_trees, extraction_workers = write_triplet_gene_trees_multiprocess(
@@ -338,7 +343,17 @@ def main():
                 processes=processes,
             )
 
-            metrics.log(f"✓ Triplet gene trees saved to: {triplet_output_path}")
+            extraction_time = time.time() - extraction_start
+            metrics.log("✓ Triplet extraction complete")
+            metrics.log(f"  Output: {triplet_output_path}")
+            metrics.log(f"  Triplets with gene trees: {triplets_with_trees}")
+            metrics.log(f"  Total subtrees extracted: {total_subtrees}")
+            metrics.log(f"  Time taken: {extraction_time:.2f}s")
+            metrics.log("")
+
+            # Stage 2: Introgression Inference
+            metrics.log("✓ Starting introgression inference stage...")
+            inference_start = time.time()
 
             results = analyze_triplet_gene_tree_file(
                 triplet_output_path,
@@ -353,18 +368,23 @@ def main():
             final_tsv = str(output_dir / "orchestrator_triplet_results.tsv")
             write_pipeline_results(results, final_tsv)
 
-            metrics.log(f"✓ Final orchestrated TSV saved to: {final_tsv}")
-            metrics.log(f"  Workers used for extraction stage: {extraction_workers}")
-            if use_multiprocessing:
-                metrics.log("  Inference stage: multiprocessing enabled")
-            else:
-                metrics.log("  Inference stage: single-worker mode (no multiprocessing)")
+            inference_time = time.time() - inference_start
+            metrics.log("✓ Introgression inference complete")
+            metrics.log(f"  Output: {final_tsv}")
             metrics.log(f"  Triplets analyzed: {len(results)}")
-            metrics.log(f"  Triplets with gene trees: {triplets_with_trees}")
-            metrics.log(f"  Total subtrees extracted: {total_subtrees}")
-            metrics.log(f"  Time taken: {time.time() - infer_start:.2f}s")
+            if use_multiprocessing:
+                metrics.log("  Parallelization: enabled (multiprocessing)")
+            else:
+                metrics.log("  Parallelization: disabled (single-worker mode)")
+            metrics.log(f"  Time taken: {inference_time:.2f}s")
+            metrics.log("")
+
+            # Summary
+            total_time = species_time + genes_time + extraction_time + inference_time
+            metrics.log("✓ End-to-end orchestration complete")
+            metrics.log(f"  Total time: {total_time:.2f}s")
         except Exception as exc:
-            metrics.log(f"✗ Error in triplet inference stage: {exc}")
+            metrics.log(f"✗ Error in triplet inference or introgression inference stage: {exc}")
             return
 
         metrics.log("\nProcessing complete!")
