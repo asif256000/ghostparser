@@ -198,9 +198,18 @@ These tests cover topology classification, discordant-count statistics, KS behav
 - `test_load_orchestrator_config_defaults_processes_to_zero`
 - `test_load_tree_parser_config_defaults_processes_to_zero`
 - `test_load_triplet_processor_config_defaults_processes_to_zero`
+- `test_path_resolution_absolute_paths`
+- `test_path_resolution_relative_paths`
+- `test_path_resolution_home_directory`
 
 These tests confirm omitted `processes` defaults to `0`, explicit values are preserved, and config mode precedence is enforced.
 They also validate centralized default behavior resolved through normalization (including `discordant_test=chi-square`, `summary_statistic=median`, and `stats_backend=standard`).
+Additionally, they validate OS-style path resolution in config values: absolute paths (`/`), relative paths (from current working directory), and home paths (`~`).
+
+### Path-resolution behavior in runtime-arg tests
+
+- Runtime argument resolution tests in `test_orchestrator.py`, `test_tree_parser.py`, and `test_triplet_processor.py` now assert resolved absolute paths for path fields.
+- This aligns CLI/config normalization with OS semantics and centralized path handling in `ghostparser.config`.
 
 ## Complete Test Function Index
 
@@ -220,6 +229,9 @@ They also validate centralized default behavior resolved through normalization (
 - `test_load_triplet_processor_config_invalid_stats_backend`
 - `test_load_triplet_processor_config_missing_input`
 - `test_load_triplet_processor_config_defaults_processes_to_zero`
+- `test_path_resolution_absolute_paths`
+- `test_path_resolution_relative_paths`
+- `test_path_resolution_home_directory`
 
 ### `tests/test_orchestrator.py`
 

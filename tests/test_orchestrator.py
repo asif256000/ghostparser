@@ -1,6 +1,7 @@
 """Tests for orchestrator module."""
 
 import argparse
+from pathlib import Path
 
 from ghostparser.orchestrator import (
     _resolve_parallel_mode,
@@ -52,8 +53,9 @@ def test_resolve_runtime_args_cli_defaults(tmp_path, monkeypatch):
 
     resolved = _resolve_runtime_args(args)
 
-    assert resolved.species_tree == "species.nwk"
-    assert resolved.gene_trees == "genes.nwk"
+    # Paths are resolved to absolute paths
+    assert resolved.species_tree == str((tmp_path / "species.nwk").resolve())
+    assert resolved.gene_trees == str((tmp_path / "genes.nwk").resolve())
     assert resolved.outgroup == ["Out1", "Out2"]
     assert resolved.output == str(tmp_path / "results")
     assert resolved.processes == 0
@@ -113,8 +115,9 @@ def test_resolve_runtime_args_config_with_cli_warns_and_ignores(tmp_path, capsys
     captured = capsys.readouterr()
 
     assert "Warning: --config-file provided; CLI arguments not in config will be ignored" in captured.out
-    assert resolved.species_tree == "s.nwk"
-    assert resolved.gene_trees == "g.nwk"
+    # Paths are resolved to absolute paths
+    assert resolved.species_tree == str(Path("s.nwk").resolve())
+    assert resolved.gene_trees == str(Path("g.nwk").resolve())
     assert resolved.outgroup == ["OutA"]
     assert resolved.processes == 0
     assert resolved.discordant_test == "chi-square"

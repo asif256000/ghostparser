@@ -1,6 +1,7 @@
 """Tests for configuration parsing."""
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -35,12 +36,13 @@ def test_load_orchestrator_config_json(tmp_path):
 
     config = load_orchestrator_config(str(config_path))
 
-    assert config["species_tree"] == "species.nwk"
-    assert config["gene_trees"] == "genes.nwk"
+    # Paths are resolved to absolute paths
+    assert config["species_tree"] == str(Path("species.nwk").resolve())
+    assert config["gene_trees"] == str(Path("genes.nwk").resolve())
     assert config["outgroup"] == ["OutA", "OutB"]
-    assert config["output"] == "out"
+    assert config["output"] == str(Path("out").resolve())
     assert config["processes"] == 4
-    assert config["triplet_filter"] == "triplets.txt"
+    assert config["triplet_filter"] == str(Path("triplets.txt").resolve())
     assert config["min_support_value"] == 0.7
     assert config["discordant_test"] == "z-test"
     assert config["summary_statistic"] == "median"
@@ -160,12 +162,13 @@ def test_load_tree_parser_config_json(tmp_path):
 
     config = load_tree_parser_config(str(config_path))
 
-    assert config["species_tree"] == "species.nwk"
-    assert config["gene_trees"] == "genes.nwk"
+    # Paths are resolved to absolute paths
+    assert config["species_tree"] == str(Path("species.nwk").resolve())
+    assert config["gene_trees"] == str(Path("genes.nwk").resolve())
     assert config["outgroup"] == ["OutA", "OutB"]
-    assert config["output"] == "out"
+    assert config["output"] == str(Path("out").resolve())
     assert config["processes"] == 2
-    assert config["triplet_filter"] == "triplets.txt"
+    assert config["triplet_filter"] == str(Path("triplets.txt").resolve())
     assert config["min_support_value"] == 0.6
     assert config["no_multiprocessing"] is True
 
@@ -224,9 +227,10 @@ def test_load_triplet_processor_config_json(tmp_path):
 
     config = load_triplet_processor_config(str(config_path))
 
-    assert config["input"] == "unique_triplets_gene_trees.txt"
-    assert config["output"] == "results.tsv"
-    assert config["stats_output"] == "stats.json"
+    # Paths are resolved to absolute paths
+    assert config["input"] == str(Path("unique_triplets_gene_trees.txt").resolve())
+    assert config["output"] == str(Path("results.tsv").resolve())
+    assert config["stats_output"] == str(Path("stats.json").resolve())
     assert config["alpha_dct"] == 0.02
     assert config["alpha_ks"] == 0.1
     assert config["discordant_test"] == "z-test"
@@ -265,3 +269,70 @@ def test_load_triplet_processor_config_defaults_processes_to_zero(tmp_path):
 
     config = load_triplet_processor_config(str(config_path))
     assert config["processes"] == 0
+
+
+def test_path_resolution_absolute_paths(tmp_path):
+    """Test that absolute paths are preserved as-is."""
+    config_path = tmp_path / "absolute_paths.json"
+    abs_species = "/absolute/path/to/species.nwk"
+    abs_genes = "/absolute/path/to/genes.nwk"
+    abs_output = "/absolute/path/to/output"
+    
+    config_path.write_text(
+        json.dumps(
+            {
+                "species_tree_path": abs_species,
+                "gene_trees_path": abs_genes,
+                "outgroup": "OutA",
+                "output_folder": abs_output,
+            }
+        )
+    )
+    
+    config = load_orchestrator_config(str(config_path))
+    assert config["species_tree"] == abs_species
+    assert config["gene_trees"] == abs_genes
+    assert config["output"] == abs_output
+
+
+def test_path_resolution_relative_paths(tmp_path):
+    """Test that relative paths are resolved from current working directory."""
+    config_path = tmp_path / "relative_paths.json"
+    
+    config_path.write_text(
+        json.dumps(
+            {
+                "species_tree_path": "data/species.nwk",
+                "gene_trees_path": "./genes.nwk",
+                "outgroup": "OutA",
+                "output_folder": "results",
+            }
+        )
+    )
+    
+    config = load_orchestrator_config(str(config_path))
+    # Relative paths should be resolved from current working directory
+    assert config["species_tree"] == str(Path("data/species.nwk").resolve())
+    assert config["gene_trees"] == str(Path("./genes.nwk").resolve())
+    assert config["output"] == str(Path("results").resolve())
+
+
+def test_path_resolution_home_directory(tmp_path):
+    """Test that ~ is expanded to user home directory."""
+    config_path = tmp_path / "home_paths.json"
+    
+    config_path.write_text(
+        json.dumps(
+            {
+                "species_tree_path": "~/data/species.nwk",
+                "gene_trees_path": "~/data/genes.nwk",
+                "outgroup": "OutA",
+            }
+        )
+    )
+    
+    config = load_orchestrator_config(str(config_path))
+    # ~ should be expanded to home directory
+    assert config["species_tree"] == str(Path("~/data/species.nwk").expanduser().resolve())
+    assert config["gene_trees"] == str(Path("~/data/genes.nwk").expanduser().resolve())
+
