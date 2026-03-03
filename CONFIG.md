@@ -2,6 +2,66 @@
 
 This guide is organized around the main pipeline entry point, `ghostparser.orchestrator`, and then the two submodules (`tree_parser`, `triplet_processor`).
 
+## Path Resolution
+
+GhostParser automatically resolves all path fields (input files, output directories, filter files) following standard operating system conventions:
+
+### Path Types
+
+1. **Absolute paths** (start with `/`):
+   ```yaml
+   species_tree_path: /home/user/data/species.tree
+   output_folder: /scratch/results
+   ```
+   - Used as-is without modification
+   - Platform-independent representation
+
+2. **Relative paths** (no leading `/`):
+   ```yaml
+   species_tree_path: data/species.tree
+   gene_trees_path: ./genes.tree
+   output_folder: results
+   ```
+   - Resolved from the **current working directory** where the command is executed
+   - Example: If you run the command from `/home/user/project/`, then `data/species.tree` resolves to `/home/user/project/data/species.tree`
+
+3. **User home directory** (starts with `~`):
+   ```yaml
+   species_tree_path: ~/data/species.tree
+   output_folder: ~/results
+   triplet_filter: ~/filters/triplets.txt
+   ```
+   - `~` expands to your home directory (e.g., `/home/username/`)
+   - Example: `~/data/species.tree` becomes `/home/username/data/species.tree`
+
+### Important Notes
+
+- **Path resolution happens at runtime** when the config/CLI is parsed
+- **All path types work in both CLI and config file modes**
+- **Relative paths are NOT relative to the config file location** - they are relative to the directory where you execute the command
+- For portability, consider using relative paths in configs and running commands from a consistent location
+
+### Examples
+
+**Config file at** `~/project/configs/run.yaml`:
+```yaml
+species_tree_path: ../data/species.tree    # Relative to execution directory, not config file
+gene_trees_path: ~/data/genes.tree         # User home directory
+output_folder: /scratch/results            # Absolute path
+```
+
+**Executed from** `/home/user/project/`:
+```bash
+python -m ghostparser.orchestrator -c configs/run.yaml
+```
+
+**Resolved paths:**
+- `species_tree_path` → `/home/user/project/../data/species.tree` → `/home/user/data/species.tree`
+- `gene_trees_path` → `/home/user/data/genes.tree`
+- `output_folder` → `/scratch/results`
+
+---
+
 ## Orchestrator-First Usage
 
 Run orchestrator with a config file:
@@ -180,6 +240,7 @@ See examples in:
 
 ## Notes
 
-- Paths in config are interpreted relative to the current working directory unless absolute paths are used.
-- In config mode, CLI options other than `--config-file` are ignored.
-- Use `--processes 1` (or `processes: 1`) to avoid multiprocessing while still using the same pipeline.
+- **Path Resolution**: All paths (absolute, relative, or `~`-prefixed) are automatically resolved to absolute paths at runtime. See the [Path Resolution](#path-resolution) section above for details.
+- In config mode (`-c/--config-file`), other CLI options are ignored with a warning.
+- Use `--processes 1` (or `processes: 1`) to disable multiprocessing while still using the same pipeline.
+- Default output folder is `./results` relative to the current working directory when not specified.

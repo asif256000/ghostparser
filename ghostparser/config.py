@@ -10,6 +10,31 @@ class ConfigError(ValueError):
     """Raised when a config payload is invalid or missing required fields."""
 
 
+def _resolve_path(path_str: str) -> str:
+    """Resolve a path string to an absolute path, handling ~, relative, and absolute paths.
+    
+    Args:
+        path_str: Path string that can be:
+                 - Absolute (starts with /): /path/to/file
+                 - Relative (no leading /): path/to/file (resolved from cwd)
+                 - User home (starts with ~): ~/path/to/file
+    
+    Returns:
+        Absolute path as a string
+    """
+    path = Path(path_str)
+    
+    # Expand user home directory (~)
+    path = path.expanduser()
+    
+    # Resolve to absolute path
+    # If already absolute, this keeps it as is
+    # If relative, resolves from current working directory
+    path = path.resolve()
+    
+    return str(path)
+
+
 DEFAULT_OUTPUT_FOLDER = "results"
 DEFAULT_PROCESSES = 0
 DEFAULT_MIN_SUPPORT_VALUE = 0.5
@@ -58,6 +83,14 @@ def _validate_required_string(payload: dict, key: str) -> str:
     return value.strip()
 
 
+def _validate_required_path(payload: dict, key: str) -> str:
+    """Validate and resolve a required path field."""
+    value = payload.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(f"Missing required config field: {key}")
+    return _resolve_path(value.strip())
+
+
 def _validate_optional_string(payload: dict, key: str) -> str | None:
     value = payload.get(key)
     if value is None:
@@ -65,6 +98,16 @@ def _validate_optional_string(payload: dict, key: str) -> str | None:
     if not isinstance(value, str) or not value.strip():
         raise ConfigError(f"Config field {key} must be a non-empty string when provided")
     return value.strip()
+
+
+def _validate_optional_path(payload: dict, key: str) -> str | None:
+    """Validate and resolve an optional path field."""
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(f"Config field {key} must be a non-empty string when provided")
+    return _resolve_path(value.strip())
 
 
 def _validate_non_negative_int(payload: dict, key: str, default: int) -> int:
@@ -125,23 +168,23 @@ def _parse_outgroups(value) -> list[str]:
 
 def normalize_orchestrator_payload(payload: dict) -> dict:
     """Normalize orchestrator config/CLI payload to internal runtime keys with defaults."""
-    species_tree = _validate_required_string(payload, "species_tree_path")
-    gene_trees = _validate_required_string(payload, "gene_trees_path")
+    species_tree = _validate_required_path(payload, "species_tree_path")
+    gene_trees = _validate_required_path(payload, "gene_trees_path")
 
     outgroups_source = payload.get("outgroups")
     if outgroups_source is None:
         outgroups_source = payload.get("outgroup")
     outgroups = _parse_outgroups(outgroups_source)
 
-    output = _validate_optional_string(payload, "output_folder")
+    output = _validate_optional_path(payload, "output_folder")
     if output is None:
-        output = str(Path.cwd() / DEFAULT_OUTPUT_FOLDER)
+        output = _resolve_path(DEFAULT_OUTPUT_FOLDER)
 
     return {
         "species_tree": species_tree,
         "gene_trees": gene_trees,
         "outgroup": outgroups,
-        "triplet_filter": _validate_optional_string(payload, "triplet_filter"),
+        "triplet_filter": _validate_optional_path(payload, "triplet_filter"),
         "output": output,
         "processes": _validate_non_negative_int(payload, "processes", DEFAULT_PROCESSES),
         "min_support_value": _validate_optional_float(payload, "min_support_value", DEFAULT_MIN_SUPPORT_VALUE),
@@ -170,8 +213,8 @@ def normalize_orchestrator_payload(payload: dict) -> dict:
 
 def normalize_tree_parser_payload(payload: dict) -> dict:
     """Normalize tree_parser config/CLI payload to internal runtime keys with defaults."""
-    species_tree = _validate_required_string(payload, "species_tree_path")
-    gene_trees = _validate_required_string(payload, "gene_trees_path")
+    species_tree = _validate_required_path(payload, "species_tree_path")
+    gene_trees = _validate_required_path(payload, "gene_trees_path")
 
     outgroups_source = payload.get("outgroups")
     if outgroups_source is None:
@@ -182,8 +225,8 @@ def normalize_tree_parser_payload(payload: dict) -> dict:
         "species_tree": species_tree,
         "gene_trees": gene_trees,
         "outgroup": outgroups,
-        "triplet_filter": _validate_optional_string(payload, "triplet_filter"),
-        "output": _validate_optional_string(payload, "output_folder"),
+        "triplet_filter": _validate_optional_path(payload, "triplet_filter"),
+        "output": _validate_optional_path(payload, "output_folder"),
         "processes": _validate_non_negative_int(payload, "processes", DEFAULT_PROCESSES),
         "min_support_value": _validate_optional_float(payload, "min_support_value", DEFAULT_MIN_SUPPORT_VALUE),
         "no_multiprocessing": _validate_optional_bool(payload, "no_multiprocessing", False),
@@ -192,12 +235,12 @@ def normalize_tree_parser_payload(payload: dict) -> dict:
 
 def normalize_triplet_processor_payload(payload: dict) -> dict:
     """Normalize triplet_processor config/CLI payload to internal runtime keys with defaults."""
-    input_path = _validate_required_string(payload, "input_path")
+    input_path = _validate_required_path(payload, "input_path")
 
     return {
         "input": input_path,
-        "output": _validate_optional_string(payload, "output_path"),
-        "stats_output": _validate_optional_string(payload, "stats_output"),
+        "output": _validate_optional_path(payload, "output_path"),
+        "stats_output": _validate_optional_path(payload, "stats_output"),
         "alpha_dct": _validate_optional_float(payload, "alpha_dct", DEFAULT_ALPHA_DCT),
         "alpha_ks": _validate_optional_float(payload, "alpha_ks", DEFAULT_ALPHA_KS),
         "discordant_test": _validate_choice(
