@@ -295,3 +295,37 @@ pytest
 ```
 
 See [tests/TESTS.md](tests/TESTS.md) for detailed test documentation.
+
+## Maintainers: Triggering a Release Build
+
+Release builds are triggered by pushing a version tag that matches `v*.*.*`.
+
+```bash
+# 1) Ensure main is up to date
+git checkout main
+git pull origin main
+
+# 2) Create an annotated release tag
+git tag -a v0.1.1 -m "Release v0.1.1"
+
+# 3) Push the tag to trigger GitHub Actions release workflow
+git push origin v0.1.1
+```
+
+Optional cleanup if you tagged the wrong commit:
+
+```bash
+# 1) Delete the local tag
+git tag -d v0.1.1
+
+# 2) Delete the remote tag
+git push origin --delete v0.1.1
+
+# 3) Manually delete the GitHub Release (if created)
+#    Go to: https://github.com/asif256000/ghostparser/releases
+#    Find the v0.1.1 release and click "Delete"
+#    OR use GitHub CLI:
+gh release delete v0.1.1
+```
+
+Note: Deleting the tag removes the git version reference, but the GitHub Release and uploaded assets remain unless explicitly deleted. For a full cleanup, delete both the tag and the release.
