@@ -1,0 +1,73 @@
+name: Build and Release
+
+# Trigger on push of version tags or manual dispatch
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # Triggers on version tags like v0.1.0, v1.2.3, etc.
+  workflow_dispatch:  # Allows manual triggering from GitHub UI
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+        
+    - name: Install build dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine
+        
+    - name: Build distributions
+      run: |
+        python -m build
+        
+    - name: List built artifacts
+      run: |
+        ls -lh dist/
+        
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        files: |
+          dist/*.whl
+          dist/*.tar.gz
+        body: |
+          ## Installation
+          
+          Download the wheel file and install:
+          ```bash
+          pip install ghostparser-*.whl
+          ```
+          
+          Or install directly from the release:
+          ```bash
+          pip install https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/ghostparser-${{ github.ref_name }}-py3-none-any.whl
+          ```
+          
+          ## Usage
+          After installation, run from anywhere:
+          ```bash
+          python -m ghostparser.orchestrator -c config.yaml
+          ```
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+    # Optional: Upload to PyPI (requires PyPI API token in repository secrets)
+    # - name: Publish to PyPI
+    #   if: startsWith(github.ref, 'refs/tags/')
+    #   env:
+    #     TWINE_USERNAME: __token__
+    #     TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+    #   run: |
+    #     twine upload dist/*
