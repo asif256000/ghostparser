@@ -33,6 +33,45 @@ poetry run pytest -q
 poetry run python -m ghostparser.orchestrator -c run_config.yaml
 ```
 
+### Installation from Wheel (Recommended for Users)
+
+For distribution to users who want to run the tool anywhere without cloning the repository:
+
+**Building the wheel:**
+
+```bash
+# Install build tool
+pip install build
+
+# Build wheel and source distribution
+python -m build
+
+# Creates: dist/ghostparser-0.1.0-py3-none-any.whl
+#          dist/ghostparser-0.1.0.tar.gz
+```
+
+**Installing from wheel:**
+
+```bash
+# Users can install from the wheel file
+pip install ghostparser-0.1.0-py3-none-any.whl
+
+# Or install directly from GitHub releases
+pip install https://github.com/asif256000/ghostparser/releases/download/v0.1.0/ghostparser-0.1.0-py3-none-any.whl
+```
+
+**After installation, users can run from any directory:**
+
+```bash
+python -m ghostparser.orchestrator -c config.yaml
+
+python -m ghostparser.tree_parser -st species.tree -gt genes.tree -og OutGroup
+
+python -m ghostparser.triplet_processor --input-path unique_triplets_gene_trees.txt
+```
+
+**Note:** The wheel installation installs the package into your Python environment, so you don't need to be in the project directory to run it. All module commands (`python -m ghostparser.*`) work from anywhere.
+
 ## Orchestrator (Primary Pipeline)
 
 Run the full pipeline (recommended):

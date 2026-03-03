@@ -54,8 +54,9 @@ def test_resolve_runtime_args_tree_parser_cli_defaults():
     )
 
     resolved = _resolve_runtime_args(args)
-    assert resolved.species_tree == "species.nwk"
-    assert resolved.gene_trees == "genes.nwk"
+    # Paths are resolved to absolute paths
+    assert resolved.species_tree == str(Path("species.nwk").resolve())
+    assert resolved.gene_trees == str(Path("genes.nwk").resolve())
     assert resolved.outgroup == ["Out1", "Out2"]
     assert resolved.min_support_value == 0.5
 
@@ -106,8 +107,9 @@ def test_resolve_runtime_args_tree_parser_config_warns_and_ignores(tmp_path, cap
     captured = capsys.readouterr()
 
     assert "Warning: --config-file provided; CLI arguments not in config will be ignored" in captured.out
-    assert resolved.species_tree == "s.nwk"
-    assert resolved.gene_trees == "g.nwk"
+    # Paths are resolved to absolute paths
+    assert resolved.species_tree == str(Path("s.nwk").resolve())
+    assert resolved.gene_trees == str(Path("g.nwk").resolve())
     assert resolved.outgroup == ["OutA"]
     assert resolved.processes == 3
     assert resolved.no_multiprocessing is True

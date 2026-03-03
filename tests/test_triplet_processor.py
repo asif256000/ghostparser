@@ -2,6 +2,7 @@
 
 import argparse
 import random
+from pathlib import Path
 
 import dendropy
 import pytest
@@ -643,7 +644,8 @@ def test_resolve_runtime_args_triplet_processor_cli_defaults():
     )
 
     resolved = _resolve_runtime_args(args)
-    assert resolved.input == "unique_triplets_gene_trees.txt"
+    # Paths are resolved to absolute paths
+    assert resolved.input == str(Path("unique_triplets_gene_trees.txt").resolve())
     assert resolved.alpha_dct == 0.01
     assert resolved.alpha_ks == 0.05
     assert resolved.discordant_test == "chi-square"
@@ -702,8 +704,9 @@ def test_resolve_runtime_args_triplet_processor_config_warns_and_ignores(tmp_pat
     captured = capsys.readouterr()
 
     assert "Warning: --config-file provided; CLI arguments not in config will be ignored" in captured.out
-    assert resolved.input == "input.tsv"
-    assert resolved.output == "out.tsv"
+    # Paths are resolved to absolute paths
+    assert resolved.input == str(Path("input.tsv").resolve())
+    assert resolved.output == str(Path("out.tsv").resolve())
     assert resolved.discordant_test == "z-test"
     assert resolved.summary_statistic == "median"
     assert resolved.stats_backend == "standard"
