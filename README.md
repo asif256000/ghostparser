@@ -1,39 +1,29 @@
 # Ghostparser
 
-A phylogenetic introgression pipeline centered on `ghostparser.orchestrator`. The orchestrator runs two internal stages (`tree_parser` and `triplet_processor`) and produces final triplet-level inference outputs.
+## Overview
 
-## Features
+**Ghostparser** is a phylogenetic introgression pipeline centered on `ghostparser.orchestrator`. The orchestrator runs two internal stages (`tree_parser` and `triplet_processor`) and produces final triplet-level inference outputs. It supports both command-line and configuration-file modes for flexible execution, with support for multiprocessing, multiple statistical backends, and configurable statistical thresholds.
 
-- Orchestrator-first end-to-end run (`tree_parser` + `triplet_processor`)
-- JSON/YAML config support with shared CLI/config normalization
-- Deterministic triplet orientation (`A,B,C`) and rooted species-triplet headers
-- Configurable DCT/KS thresholds and statistical backend
-- Optional multiprocessing with `processes=0` meaning all cores
+---
+
+## Jump to Sections:
+
+1. [Quick Start](#quick-start)
+2. [Modules](#modules)
+   - [Orchestrator (Primary Pipeline)](#orchestrator-primary-pipeline)
+   - [Tree Parser](#tree-parser-submodule)
+   - [Triplet Processor](#triplet-processor-submodule)
+3. [Orchestrator Input/Output](#orchestrator-inputoutput)
+4. [Configuration](#configuration)
+5. [Defaults](#defaults-at-a-glance)
+6. [Testing](#testing)
+7. [For Maintainers](#maintainers-triggering-a-release-build)
+
+---
 
 ## Quick Start
 
-### Installation
-
-```bash
-pip install -r requirements.txt
-```
-
-### Installation (Poetry 2.x+)
-
-If you prefer Poetry 2.x+ instead of plain pip:
-
-```bash
-poetry install
-```
-
-Run commands with Poetry:
-
-```bash
-poetry run pytest -q
-poetry run python -m ghostparser.orchestrator -c run_config.yaml
-```
-
-### Installation from Wheel (Recommended for Users)
+#### Installation from Wheel (Recommended for Users)
 
 Pre-built wheel distributions are automatically created and published when a release is tagged. Users can download and install them without building locally.
 
@@ -68,27 +58,53 @@ python -m ghostparser.triplet_processor --input-path unique_triplets_gene_trees.
 
 **Note:** The wheel installation installs the package into your Python environment, so you don't need to be in the project directory to run it. All module commands (`python -m ghostparser.*`) work from anywhere.
 
-## Orchestrator (Primary Pipeline)
 
-Run the full pipeline (recommended):
+### Installation via pip (For Developers)
 
 ```bash
-python -m ghostparser.orchestrator -st species.tree -gt genes.tree -og OutGroup
+pip install -r requirements.txt
 ```
 
-Run with config file:
+#### Poetry 2.x+ Alternative
+
+If you prefer Poetry 2.x+ instead of plain pip:
+
+```bash
+poetry install
+```
+
+Run commands with Poetry:
+
+```bash
+poetry run pytest -q
+poetry run python -m ghostparser.orchestrator -c run_config.yaml
+```
+
+---
+
+## Modules
+
+### Orchestrator (Primary Pipeline)
+
+Run with config file (recommended for reproducibility):
 
 ```bash
 python -m ghostparser.orchestrator -c run_config.yaml
 ```
 
+Run the full pipeline via CLI flags:
+
+```bash
+python -m ghostparser.orchestrator -st species.tree -gt genes.tree -og OutGroup
+```
+
 CLI mode with explicit worker count:
 
 ```bash
-python -m ghostparser.orchestrator -st species.tree -gt genes.tree -og OutGroup --processes 0
+python -m ghostparser.orchestrator -st species.tree -gt genes.tree -og OutGroup --processes 4
 ```
 
-### How this pipeline works
+#### How the Pipeline Works
 
 - `tree_parser` standardizes species/gene trees, roots on outgroup(s), and writes triplet-specific gene-tree blocks.
 - `triplet_processor` applies the GhostParser statistical decision pipeline to each triplet block.
@@ -96,31 +112,33 @@ python -m ghostparser.orchestrator -st species.tree -gt genes.tree -og OutGroup 
 
 GhostParser is configurable (discordant test, backend, thresholds, summary statistic), so execution follows the same core pipeline stages while allowing controlled method choices.
 
-### Orchestrator arguments
+#### Orchestrator Arguments
 
-- **Required**
-    - `-st, --species-tree-path`
-    - `-gt, --gene-trees-path`
-    - `-og, --outgroups`
-- **Config mode**
-    - `-c, --config-file`
-- **Common optional**
-    - `--output-folder`
-    - `--triplet-filter`
-    - `--processes`
-    - `--min-support-value`
-    - `--discordant-test`
-    - `--summary-statistic`
-    - `--stats-backend`
-    - `--alpha-dct`, `--alpha-ks`
+**Required:**
+- `-st, --species-tree-path`
+- `-gt, --gene-trees-path`
+- `-og, --outgroups`
 
-### Primary outputs
+**Config mode:**
+- `-c, --config-file`
+
+**Common optional:**
+- `--output-folder`
+- `--triplet-filter`
+- `--processes`
+- `--min-support-value`
+- `--discordant-test`
+- `--summary-statistic`
+- `--stats-backend`
+- `--alpha-dct`, `--alpha-ks`
+
+#### Primary Outputs
 
 1. `unique_triplets_gene_trees.txt`
 2. `orchestrator_triplet_results.tsv`
 3. `metrics.txt`
 
-## Tree Parser (Submodule)
+### Tree Parser (Submodule)
 
 Use this module when you only want preprocessing + triplet extraction.
 
@@ -134,13 +152,14 @@ Config mode:
 python -m ghostparser.tree_parser -c sample_configs/tree_parser_minimal.yaml
 ```
 
-Core behavior:
+#### Core Behavior
 
 - Removes support labels and preserves branch lengths
+- If support values are present, removes trees with average support below `min_support_value`
 - Roots on outgroup(s), prunes outgroup clade, and logs excluded taxa
 - Writes processed trees and `unique_triplets_gene_trees.txt`
 
-## Triplet Processor (Submodule)
+### Triplet Processor (Submodule)
 
 Use this module when you already have `unique_triplets_gene_trees.txt` and only need inference.
 
@@ -154,47 +173,42 @@ Config mode:
 python -m ghostparser.triplet_processor -c sample_configs/triplet_processor_minimal.yaml
 ```
 
-Core behavior:
+#### Core Behavior
 
 - Runs DCT (`chi-square` or `z-test`)
 - Runs KS tree-height test when DCT is significant
-- Applies summary-statistic comparison (`median` or `mean`) for final classification
+- Applies summary-statistic comparison (`median`, `mean`, or binned `mode`) for final classification
 
-## Example Input/Output (Tree Parser)
+---
 
-The arguments below are for `tree_parser`:
+---
 
-**Required:**
-- `--species-tree-path`: Path to the species tree file in Newick format
-- `--gene-trees-path`: Path to the gene trees file in Newick format
-- `--outgroups`: Outgroup species identifier(s). Use comma-separated taxa for multiple outgroups.
+## Orchestrator Input/Output
 
-Short aliases:
-- `-st` for `--species-tree-path`
-- `-gt` for `--gene-trees-path`
-- `-og` for `--outgroups`
-- `-c` for `--config-file`
+### Input Expectations
 
-**Optional:**
+**Required Arguments:**
+- `--species-tree-path` (alias `-st`): Path to the species tree file in Newick format
+- `--gene-trees-path` (alias `-gt`): Path to the gene trees file in Newick format
+- `--outgroups` (alias `-og`): Outgroup species identifier(s). Use comma-separated taxa for multiple outgroups.
+
+**Optional Arguments:**
 - `--output-folder`: Output folder relative to the input data folder (default: same folder as input data).
-- `--triplet-filter`: Path to a triplet filter file (comma-separated taxa per line). When provided, only those
-    triplets are processed. Triplets containing taxa missing from the species tree are skipped with a warning.
-- `--processes`: Number of worker processes for multiprocessing.
-                    Defaults to `0` (all cores). Ignored if `--no-multiprocessing` is set.
-- `--no-multiprocessing`: Disable multiprocessing. Processes triplets sequentially using a single worker.
-                         Useful for debugging or on systems with limited resources.
+- `--triplet-filter`: Path to a triplet filter file (comma-separated taxa per line). When provided, only those triplets are processed. Triplets containing taxa missing from the species tree are skipped with a warning.
+- `--processes`: Number of worker processes for multiprocessing. Defaults to `0` (all cores). Ignored if `--no-multiprocessing` is set.
+- `--no-multiprocessing`: Disable multiprocessing. Processes triplets sequentially using a single worker. Useful for debugging or on systems with limited resources.
 
-## Output Files
+### Output Files
 
-The tool generates these output files:
+The orchestrator generates these output files:
 
-1. **`processed_<species_tree>`** - Processed species tree with support values removed and outgroup rooting applied
-2. **`processed_<gene_trees>`** - Processed gene trees with support values removed and outgroup rooting applied
+1. **`processed_species.tree`** - Processed species tree with support values removed and outgroup rooting applied
+2. **`processed_gene_trees.tree`** - Processed gene trees with support values removed and outgroup rooting applied
 3. **`unique_triplets_gene_trees.txt`** - Triplets normalized to `A,B,C` (with `A,B` as species sisters), with required header format `triplet<TAB>count<TAB>species_tree` (non-empty species subtree)
 4. **`metrics.txt`** - Metrics log with warnings, timings, and counts
-5. **`triplet_introgression_results.tsv`** - Final triplet-level classification results (`no_introgression`, `outflow_introgression`, `inflow_introgression`, `ghost_introgression`, or `unresolved`)
+5. **`orchestrator_triplet_results.tsv`** - Final triplet-level classification results (`no_introgression`, `outflow_introgression`, `inflow_introgression`, `ghost_introgression`, or `unresolved`)
 
-## Example
+### Example Usage
 
 **Species tree** (`species.tree`):
 
@@ -212,26 +226,22 @@ The tool generates these output files:
 **Run:**
 
 ```bash
-python -m ghostparser.tree_parser -st species.tree -gt genes.tree -og OutGroup
+python -m ghostparser.orchestrator -st species.tree -gt genes.tree -og OutGroup
 ```
 
-Multiple outgroups (comma-separated):
+**Multiple outgroups (comma-separated):**
 
 ```bash
-python -m ghostparser.tree_parser -st species.tree -gt genes.tree -og OutGroup1,OutGroup2
+python -m ghostparser.orchestrator -st species.tree -gt genes.tree -og OutGroup1,OutGroup2
 ```
 
-Triplet filter file (comma-separated taxa per line):
-
-`triplets.txt` is an input filter file; only those triplets are processed.
+**With triplet filter:**
 
 ```bash
-python -m ghostparser.tree_parser -st species.tree -gt genes.tree -og OutGroup --triplet-filter triplets.txt
+python -m ghostparser.orchestrator -st species.tree -gt genes.tree -og OutGroup --triplet-filter triplets.txt
 ```
 
-When multiple outgroups are provided, the species tree is rooted on their most recent common ancestor (MRCA) and
-the outgroup clade is pruned. Any additional taxa that fall inside the outgroup clade are excluded from triplet
-generation and logged as a warning (including the full list of excluded taxa) in the metrics file.
+When multiple outgroups are provided, the species tree is rooted on their most recent common ancestor (MRCA) and the outgroup clade is pruned. Any additional taxa that fall inside the outgroup clade are excluded from triplet generation and logged as a warning (including the full list of excluded taxa) in the metrics file.
 
 **Output** (`unique_triplets_gene_trees.txt`):
 
@@ -247,40 +257,41 @@ TaxaA,TaxaC,TaxaD	1	((TaxaA:0.1,TaxaC:0.2):0.3,TaxaD:0.4);
 ((TaxaA:0.11,TaxaC:0.22):0.33,TaxaD:0.44);
 ```
 
-## Documentation
+---
 
-- **[Orchestrator Module Guide](ghostparser/ORCHESTRATOR.md)** - End-to-end orchestrator inputs, outputs, and result columns
-- **[Configuration Guide](CONFIG.md)** - Orchestrator-first config keys and module-specific config sections
-- **[Test Documentation](tests/TESTS.md)** - Orchestrator-first testing map and full test index
-- **[Module Documentation](ghostparser/GHOSTPARSER.md)** - Full API details for all modules
+## Configuration
 
-Note: module-specific guides live under the [ghostparser](ghostparser/) folder.
+See the **[Configuration Guide](CONFIG.md)** for complete details on:
+- Orchestrator-first config keys and structure
+- Module-specific configuration sections
+- JSON/YAML configuration formats
+- Configuration precedence and CLI override rules
+
+---
 
 ## Defaults at a Glance
 
 Core defaults are centralized and applied consistently in both CLI mode and config-file mode:
 
+**Statistical and Processing Defaults:**
 - `discordant_test`: `chi-square`
 - `summary_statistic`: `median`
 - `stats_backend`: `standard`
 - `alpha_dct`: `0.01`
 - `alpha_ks`: `0.05`
+
+**Execution Defaults:**
 - `processes`: `0` (all available CPU cores)
 - `output_folder` (orchestrator/tree_parser): `./results`
 - `min_support_value`: `0.5`
 
-Backend details:
+**Backend Details:**
+- `stats_backend`: `standard` (Uses `scipy.stats` and `statsmodels` for DCT and KS tests)
 
-- `custom`: uses GhostParser manual implementations for chi-square, two-proportion z-test, and KS test
-- `standard`: uses SciPy for chi-square/KS and statsmodels for two-proportion z-test
-
+**Configuration Precedence:**
 When `-c/--config-file` is provided, other CLI flags are ignored with a warning.
 
-Primary orchestrator outputs:
-
-- `unique_triplets_gene_trees.txt` (triplet-wise extracted gene trees used as input to stage 2)
-- `orchestrator_triplet_results.tsv` (final per-triplet inference/statistics table)
-- `metrics.txt` (run log, counts, timings, warnings)
+---
 
 ## Testing
 
@@ -290,9 +301,13 @@ Run all tests:
 pytest
 ```
 
-See [tests/TESTS.md](tests/TESTS.md) for detailed test documentation.
+See [tests/TESTS.md](tests/TESTS.md) for detailed test documentation and test map.
 
-## Maintainers: Triggering a Release Build
+---
+
+## For Maintainers
+
+### Triggering a Release Build
 
 Release builds are triggered by pushing a version tag that matches `v*.*.*`.
 
