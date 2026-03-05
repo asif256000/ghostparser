@@ -101,7 +101,7 @@ def test_load_orchestrator_config_invalid_summary_statistic(tmp_path):
                 "species_tree_path": "species.nwk",
                 "gene_trees_path": "genes.nwk",
                 "outgroup": "OutA",
-                "summary_statistic": "mode",
+                "summary_statistic": "invalid-summary",
             }
         )
     )

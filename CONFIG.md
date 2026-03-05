@@ -142,7 +142,8 @@ python -m ghostparser.triplet_processor -c sample_configs/triplet_processor_mini
   - Allowed values: `chi-square` (default), `z-test`.
 - `summary_statistic` (string)
   - Statistic used for con/dis1 distributions after KS test.
-  - Allowed values: `median` (default), `mean`.
+  - Allowed values: `median` (default), `mean`, `mode`.
+  - `mode` bins heights to 3 decimal places before computing the mode; ties keep the maximum mode value.
 - `stats_backend` (string)
   - Statistical backend used for DCT and KS computations.
   - Allowed values: `standard` (default), `custom`.
@@ -220,7 +221,8 @@ See examples in:
 - `discordant_test` (string)
   - Allowed values: `chi-square` (default), `z-test`.
 - `summary_statistic` (string)
-  - Allowed values: `median` (default), `mean`.
+  - Allowed values: `median` (default), `mean`, `mode`.
+  - `mode` bins heights to 3 decimal places before computing the mode; ties keep the maximum mode value.
 - `stats_backend` (string)
   - Statistical backend used for DCT and KS computations.
   - Allowed values: `standard` (default), `custom`.

@@ -45,7 +45,7 @@ DEFAULT_ALPHA_DCT = 0.01
 DEFAULT_ALPHA_KS = 0.05
 
 DISCORDANT_TEST_CHOICES = ("chi-square", "z-test")
-SUMMARY_STATISTIC_CHOICES = ("mean", "median")
+SUMMARY_STATISTIC_CHOICES = ("mean", "median", "mode")
 STATS_BACKEND_CHOICES = ("custom", "standard")
 
 

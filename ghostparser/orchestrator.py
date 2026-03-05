@@ -49,6 +49,7 @@ from .config import (
     DEFAULT_OUTPUT_FOLDER,
     DEFAULT_STATS_BACKEND,
     DEFAULT_SUMMARY_STATISTIC,
+    SUMMARY_STATISTIC_CHOICES,
     STATS_BACKEND_CHOICES,
     load_orchestrator_config,
     normalize_orchestrator_payload,
@@ -132,7 +133,7 @@ def _build_argument_parser():
     )
     parser.add_argument(
         "--summary-statistic",
-        choices=("mean", "median"),
+        choices=SUMMARY_STATISTIC_CHOICES,
         default=None,
         help=f"Summary statistic after KS test (default: {DEFAULT_SUMMARY_STATISTIC})",
     )
