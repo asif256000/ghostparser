@@ -22,11 +22,11 @@ keeping memory bounded to the active triplet chunk.
 
 `triplet_processor` consumes `unique_triplets_gene_trees.txt` and applies the GhostParser decision pipeline:
 
-1. Set concordant topology to species topology, and rank only discordants by observed frequency (`dis1`, `dis2`).
+1. Count concordant and discordant topology frequencies, then relabel taxa so concordant is `AB|C` and discordant1 is `BC|A`.
 2. Compute `H(T)` as the average root-to-tip distance.
 3. Run discordant count test (configurable: Pearson chi-square or two-proportion z-test, alpha `alpha_dct`, default `0.01`).
 4. If significant, run two-sample KS tree-height test (alpha `alpha_ks`, default `0.05`).
-5. If significant, compare selected summary statistics (median by default, mean optional) to infer outflow vs ghost introgression.
+5. If significant, compare selected summary statistics (median by default; mean and binned mode optional) to infer outflow vs ghost introgression.
 
 This is a configurable pipeline: users can choose supported statistical methods and thresholds while preserving the same core stage order.
 
@@ -93,7 +93,7 @@ Returns:
 
 ### `run_triplet_pipeline(species_triplet, triplet_gene_trees, alpha_dct=0.01, alpha_ks=0.05, discordant_test='chi-square', summary_statistic='median', stats_backend='standard')`
 
-Runs full sequential GhostParser logic and returns counts, p-values, selected summary statistics (`summary_con`, `summary_dis` fields), and final classification.
+Runs full sequential GhostParser logic and returns counts, p-values, summary values, and final classification.
 
 Discordant test options:
 
@@ -104,6 +104,7 @@ Summary statistic options after KS test:
 
 - `median` (default)
 - `mean`
+- `mode` (values rounded to 3 decimals before computing mode; if multiple modes, maximum is used)
 
 Statistical backend options:
 
@@ -112,10 +113,10 @@ Statistical backend options:
 
 Topology convention:
 
-- `con`: species-matching topology
-- `dis1`: more frequent of the two discordant topologies
-- `dis2`: less frequent of the two discordant topologies
-- ties between discordants use deterministic first-discordant ordering
+- labels are canonicalized after counting so concordant is always `((A,B),C)`
+- `n_dis1` always maps to `((B,C),A)`
+- `n_dis2` always maps to `((A,C),B)`
+- ties between discordants keep canonical ordering
 - `most_frequent_matches_concordant`: `True` when concordant frequency is not lower than either discordant frequency
 
 Output includes `species_tree` (the extracted species-tree Newick for the triplet).
@@ -140,7 +141,7 @@ Runs the pipeline for all triplets in an input file with configurable discordant
 
 ### `write_pipeline_results(results, output_filepath)`
 
-Writes per-triplet results to a TSV file with counts, DCT/KS statistics, selected summary statistic name, summary values (`summary_con`, `summary_dis`), and classification.
+Writes per-triplet results to a TSV file with counts, DCT/KS statistics, dynamic summary columns (`median_con`/`median_dis`, `mean_con`/`mean_dis`, or `mode_con`/`mode_dis`), and classification.
 
 ### CLI usage
 
@@ -159,7 +160,7 @@ Optional arguments:
 - `--output-path`: output TSV path (default: `triplet_introgression_results.tsv` next to input)
 - `--alpha-dct`: DCT threshold (default: `0.01`)
 - `--alpha-ks`: KS threshold (default: `0.05`)
-- `--summary-statistic`: `median` (default) or `mean`
+- `--summary-statistic`: `median` (default), `mean`, or `mode`
 - `--stats-backend`: `standard` (default) or `custom`
 - `--processes`: worker count for triplet inference (`0` = all cores)
 - `--no-multiprocessing`: disable multiprocessing for triplet inference

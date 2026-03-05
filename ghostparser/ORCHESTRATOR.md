@@ -80,20 +80,15 @@ Canonical topology strings:
   - Source: species-triplet subtree header passed into `run_triplet_pipeline`.
   - Method: exact extracted species-triplet Newick string for that triplet.
 
-- `dis1_topology`
-  - Source: `run_triplet_pipeline`.
-  - Method: more frequent of the two discordant topologies.
+Triplet labeling is canonicalized after topology-frequency counting so that:
 
-- `dis2_topology`
-  - Source: `run_triplet_pipeline`.
-  - Method: less frequent of the two discordant topologies.
+- concordant is always `((A,B),C)`
+- discordant1 is always `((B,C),A)` (and represented by `n_dis1`)
+- discordant2 is always `((A,C),B)` (and represented by `n_dis2`)
+
+If the two discordant topologies tie in frequency, canonical ordering is kept.
 
 ### Frequency Metadata
-
-- `highest_freq_topologies`
-  - Source: `run_triplet_pipeline`.
-  - Method: set of topologies whose count equals the global max among the three.
-  - TSV representation: comma-joined list.
 
 - `most_frequent_matches_concordant`
   - Source: `run_triplet_pipeline`.
@@ -144,23 +139,20 @@ Per-gene-tree height uses:
 
 ### Height Summary Values and Final Classification
 
-- `summary_statistic`
-  - Method: records which summary function is used for height comparison (`median` by default, or `mean` when configured).
-  - This controls the values written to `summary_con` and `summary_dis`.
+- Dynamic summary columns in TSV:
+  - `median_con` / `median_dis` when `summary_statistic=median`
+  - `mean_con` / `mean_dis` when `summary_statistic=mean`
+  - `mode_con` / `mode_dis` when `summary_statistic=mode`
 
-- `summary_con`
-  - Method: summary value for `con_topology` heights using `summary_statistic`; only populated if KS is significant.
-
-- `summary_dis`
-  - Method: summary value for `dis1_topology` heights using `summary_statistic`; only populated if KS is significant.
+`mode` uses 3-decimal binning before mode selection; if multiple modes remain, the maximum mode value is used.
 
 - `classification`
   - Decision path:
     - `no_introgression` if DCT is not significant
     - `inflow_introgression` if DCT significant but KS not significant
     - if KS significant:
-      - `outflow_introgression` if `summary_con > summary_dis`
-      - `ghost_introgression` if `summary_con < summary_dis`
+      - `outflow_introgression` if `<summary>_con > <summary>_dis`
+      - `ghost_introgression` if `<summary>_con < <summary>_dis`
       - `unresolved` if equal/undefined.
 
 ### Data Coverage Tracking
@@ -177,13 +169,13 @@ Below is an example of how one row appears in `orchestrator_triplet_results.tsv`
 Header (truncated for readability):
 
 ```tsv
-triplet	species_tree	dis1_topology	dis2_topology	highest_freq_topologies	n_con	n_dis1	n_dis2	most_frequent_matches_concordant	dct_chi_statistics	dct_z_score	dct_p_value	dct_significant	ks_statistic	ks_p_value	ks_significant	classification	analyzed_trees
+triplet	species_tree	n_con	n_dis1	n_dis2	most_frequent_matches_concordant	dct_chi_statistics	dct_p_value	dct_significant	ks_statistic	ks_p_value	ks_significant	median_con	median_dis	classification	analyzed_trees
 ```
 
 Example data row:
 
 ```tsv
-TaxaA,TaxaB,TaxaC	((TaxaA:1,TaxaB:1):1,TaxaC:1);	((B,C),A)	((A,C),B)	((B,C),A)	8	12	4	False	8		0.001	True	0.2	0.07	False	inflow_introgression	24
+TaxaA,TaxaB,TaxaC	((TaxaA:1,TaxaB:1):1,TaxaC:1);	8	12	4	False	8	0.001	True	0.2	0.07	False			inflow_introgression	24
 ```
 
 How to read this example quickly:
