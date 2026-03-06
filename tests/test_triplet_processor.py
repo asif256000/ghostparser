@@ -297,7 +297,10 @@ def test_run_triplet_pipeline_no_introgression_when_dct_not_significant():
 
     assert result.classification == "no_introgression"
     assert not result.dct_significant
-    assert result.ks_p_value is None
+    assert result.ks_p_value is not None
+    assert result.ks_statistic is not None
+    assert result.summary_con is not None
+    assert result.summary_dis is not None
 
 
 def test_run_triplet_pipeline_inflow_when_ks_not_significant():
@@ -311,6 +314,8 @@ def test_run_triplet_pipeline_inflow_when_ks_not_significant():
 
     assert result.dct_significant
     assert result.ks_significant is False
+    assert result.summary_con is not None
+    assert result.summary_dis is not None
     assert result.classification == "inflow_introgression"
 
 
@@ -577,6 +582,7 @@ def test_write_pipeline_results_uses_dct_chi_stats_column_for_chi_square(tmp_pat
     assert "dct_z_score" not in header
     assert "median_con" in header
     assert "median_dis" in header
+    assert chi_idx < header.index("dct_p_value")
 
     assert row[chi_idx] != ""
 

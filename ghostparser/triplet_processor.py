@@ -576,52 +576,12 @@ def _run_triplet_pipeline_from_observations(
     )
     dct_significant = dct_p_value <= alpha_dct
 
-    if not dct_significant:
-        return TripletPipelineResult(
-            triplet=canonical_triplet,
-            species_tree=species_tree_newick,
-            most_frequent_matches_concordant=most_frequent_matches_concordant,
-            n_con=n_con,
-            n_dis1=n_dis1,
-            n_dis2=n_dis2,
-            dct_statistic=dct_statistic,
-            dct_p_value=dct_p_value,
-            dct_significant=False,
-            ks_p_value=None,
-            ks_statistic=None,
-            ks_significant=None,
-            summary_con=None,
-            summary_dis=None,
-            classification="no_introgression",
-            analyzed_trees=analyzed_trees,
-        )
-
     ks_statistic, ks_p_value = run_two_sample_ks_test(
         canonical_heights[dis1_topology],
         canonical_heights[con_topology],
         stats_backend=stats_backend,
     )
     ks_significant = ks_p_value <= alpha_ks
-
-    if not ks_significant:
-        return TripletPipelineResult(
-            triplet=canonical_triplet,
-            species_tree=species_tree_newick,
-            most_frequent_matches_concordant=most_frequent_matches_concordant,
-            n_con=n_con,
-            n_dis1=n_dis1,
-            n_dis2=n_dis2,
-            dct_statistic=dct_statistic,
-            dct_p_value=dct_p_value,
-            dct_significant=True,
-            ks_p_value=ks_p_value,
-            ks_statistic=ks_statistic,
-            ks_significant=False,
-            summary_con=None,
-            summary_dis=None,
-            classification="inflow_introgression",
-            analyzed_trees=analyzed_trees,
-        )
 
     if summary_statistic == "mean":
         summary_con = _mean(canonical_heights[con_topology])
@@ -633,7 +593,11 @@ def _run_triplet_pipeline_from_observations(
         summary_con = _median(canonical_heights[con_topology])
         summary_dis = _median(canonical_heights[dis1_topology])
 
-    if summary_con is None or summary_dis is None:
+    if not dct_significant:
+        classification = "no_introgression"
+    elif not ks_significant:
+        classification = "inflow_introgression"
+    elif summary_con is None or summary_dis is None:
         classification = "unresolved"
     elif summary_con > summary_dis:
         classification = "outflow_introgression"
@@ -651,10 +615,10 @@ def _run_triplet_pipeline_from_observations(
         n_dis2=n_dis2,
         dct_statistic=dct_statistic,
         dct_p_value=dct_p_value,
-        dct_significant=True,
+        dct_significant=dct_significant,
         ks_p_value=ks_p_value,
         ks_statistic=ks_statistic,
-        ks_significant=True,
+        ks_significant=ks_significant,
         summary_con=summary_con,
         summary_dis=summary_dis,
         classification=classification,
@@ -919,6 +883,7 @@ def write_pipeline_results(
         "n_dis1",
         "n_dis2",
         "most_frequent_matches_concordant",
+        dct_column,
         "dct_p_value",
         "dct_significant",
         "ks_statistic",
@@ -929,8 +894,6 @@ def write_pipeline_results(
         "classification",
         "analyzed_trees",
     ]
-
-    header.insert(9, dct_column)
 
     with open(output_filepath, "w") as out_f:
         out_f.write("\t".join(header) + "\n")
@@ -945,6 +908,7 @@ def write_pipeline_results(
                 str(result.n_dis1),
                 str(result.n_dis2),
                 str(result.most_frequent_matches_concordant),
+                f"{result.dct_statistic:.12g}",
                 f"{result.dct_p_value:.12g}",
                 str(result.dct_significant),
                 "" if result.ks_statistic is None else f"{result.ks_statistic:.12g}",
@@ -955,8 +919,6 @@ def write_pipeline_results(
                 result.classification,
                 str(result.analyzed_trees),
             ]
-
-            row.insert(9, f"{result.dct_statistic:.12g}")
 
             out_f.write("\t".join(row) + "\n")
 
