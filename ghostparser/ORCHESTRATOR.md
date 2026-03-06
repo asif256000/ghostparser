@@ -107,7 +107,7 @@ If the two discordant topologies tie in frequency, canonical ordering is kept.
 
 ### DCT-like Test Outputs
 
-- `dct_chi_statistics`
+- `dct_chi_stats`
   - Method: included only when `--discordant-test chi-square` is used for the run.
 
 - `dct_z_score`
@@ -169,7 +169,7 @@ Below is an example of how one row appears in `orchestrator_triplet_results.tsv`
 Header (truncated for readability):
 
 ```tsv
-triplet	species_tree	n_con	n_dis1	n_dis2	most_frequent_matches_concordant	dct_chi_statistics	dct_p_value	dct_significant	ks_statistic	ks_p_value	ks_significant	median_con	median_dis	classification	analyzed_trees
+triplet	species_tree	n_con	n_dis1	n_dis2	most_frequent_matches_concordant	dct_chi_stats	dct_p_value	dct_significant	ks_statistic	ks_p_value	ks_significant	median_con	median_dis	classification	analyzed_trees
 ```
 
 Example data row:
