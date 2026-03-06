@@ -48,8 +48,9 @@ from .config import (
 from .triplet_utils import (
     ALL_TOPOLOGIES,
     TOPOLOGY_AB,
+    TOPOLOGY_AC,
+    TOPOLOGY_BC,
     classify_triplet_topology_string,
-    rank_topologies_by_frequency,
 )
 
 
@@ -63,25 +64,16 @@ class TripletPipelineResult:
 
     triplet: tuple[str, str, str]
     species_tree: str | None
-    species_topology: str
-    dis1_topology: str
-    dis2_topology: str
-    top1_topology: str
-    top2_topology: str
-    top3_topology: str
-    highest_freq_topologies: tuple[str, ...]
     most_frequent_matches_concordant: bool
     n_con: int
     n_dis1: int
     n_dis2: int
-    dct_chi_statistics: float | None
-    dct_z_score: float | None
+    dct_statistic: float
     dct_p_value: float
     dct_significant: bool
     ks_p_value: float | None
     ks_statistic: float | None
     ks_significant: bool | None
-    summary_statistic: str
     summary_con: float | None
     summary_dis: float | None
     classification: Classification
@@ -92,22 +84,16 @@ class TripletPipelineResult:
         return {
             "triplet": self.triplet,
             "species_tree": self.species_tree,
-            "dis1_topology": self.dis1_topology,
-            "dis2_topology": self.dis2_topology,
-            "topology_frequency_ranking": [self.top1_topology, self.top2_topology, self.top3_topology],
-            "highest_freq_topologies": list(self.highest_freq_topologies),
             "most_frequent_matches_concordant": self.most_frequent_matches_concordant,
             "n_con": self.n_con,
             "n_dis1": self.n_dis1,
             "n_dis2": self.n_dis2,
-            "dct_chi_statistics": self.dct_chi_statistics,
-            "dct_z_score": self.dct_z_score,
+            "dct_statistic": self.dct_statistic,
             "dct_p_value": self.dct_p_value,
             "dct_significant": self.dct_significant,
             "ks_statistic": self.ks_statistic,
             "ks_p_value": self.ks_p_value,
             "ks_significant": self.ks_significant,
-            "summary_statistic": self.summary_statistic,
             "summary_con": self.summary_con,
             "summary_dis": self.summary_dis,
             "classification": self.classification,
@@ -171,28 +157,15 @@ def classify_triplet_topology(
 
 def _resolve_topology_roles(topology_counts, species_topology):
     """Resolve concordant/discordant roles and concordant frequency status."""
-    con_topology = species_topology
-    discordant_topologies = [topology for topology in ALL_TOPOLOGIES if topology != con_topology]
-    if len(discordant_topologies) != 2:
-        raise ValueError(f"Invalid species topology: {species_topology}")
+    if species_topology != TOPOLOGY_AB:
+        raise ValueError("Resolved topology roles require species_topology == ((A,B),C)")
 
-    first_discordant, second_discordant = discordant_topologies
-    first_count = int(topology_counts.get(first_discordant, 0))
-    second_count = int(topology_counts.get(second_discordant, 0))
-
-    if first_count == second_count:
-        dis1_topology, dis2_topology = first_discordant, second_discordant
-    elif first_count > second_count:
-        dis1_topology, dis2_topology = first_discordant, second_discordant
-    else:
-        dis1_topology, dis2_topology = second_discordant, first_discordant
-
-    n_con = int(topology_counts.get(con_topology, 0))
-    n_dis1 = int(topology_counts.get(dis1_topology, 0))
-    n_dis2 = int(topology_counts.get(dis2_topology, 0))
+    n_con = int(topology_counts.get(TOPOLOGY_AB, 0))
+    n_dis1 = int(topology_counts.get(TOPOLOGY_BC, 0))
+    n_dis2 = int(topology_counts.get(TOPOLOGY_AC, 0))
     most_frequent_matches_concordant = n_con >= n_dis1 and n_con >= n_dis2
 
-    return con_topology, dis1_topology, dis2_topology, most_frequent_matches_concordant
+    return TOPOLOGY_AB, TOPOLOGY_BC, TOPOLOGY_AC, most_frequent_matches_concordant
 
 
 def pearson_discordant_chi_square_test(n_dis1, n_dis2):
@@ -413,6 +386,109 @@ def _mean(values):
     return sum(values_float) / len(values_float)
 
 
+def _mode_binned(values, decimals=3):
+    """Compute mode after rounding values to a fixed decimal precision.
+
+    If multiple modes are present, return the maximum mode value.
+    """
+    if not values:
+        return None
+
+    counts = {}
+    for value in values:
+        rounded = round(float(value), decimals)
+        counts[rounded] = counts.get(rounded, 0) + 1
+
+    max_frequency = max(counts.values())
+    modes = [value for value, count in counts.items() if count == max_frequency]
+    return max(modes)
+
+
+_TOPOLOGY_TO_PAIR = {
+    TOPOLOGY_AB: frozenset(("A", "B")),
+    TOPOLOGY_BC: frozenset(("B", "C")),
+    TOPOLOGY_AC: frozenset(("A", "C")),
+}
+_PAIR_TO_TOPOLOGY = {pair: topology for topology, pair in _TOPOLOGY_TO_PAIR.items()}
+
+
+def _relabel_topology(topology, old_to_new_labels):
+    """Relabel a canonical topology string under an old->new label mapping."""
+    old_pair = _TOPOLOGY_TO_PAIR[topology]
+    new_pair = frozenset(old_to_new_labels[label] for label in old_pair)
+    return _PAIR_TO_TOPOLOGY[new_pair]
+
+
+def _build_topology_maps(old_to_new_labels):
+    """Build topology relabel maps for a label permutation.
+
+    Returns:
+        Tuple of:
+        - old_to_new_topology: maps old topology key -> relabeled topology key
+        - new_to_old_topology: inverse map (relabeled topology key -> old key)
+    """
+    old_to_new_topology = {}
+    new_to_old_topology = {}
+    for old_topology in ALL_TOPOLOGIES:
+        new_topology = _relabel_topology(old_topology, old_to_new_labels)
+        old_to_new_topology[old_topology] = new_topology
+        new_to_old_topology[new_topology] = old_topology
+    return old_to_new_topology, new_to_old_topology
+
+
+def _canonicalize_triplet_labels(species_triplet, species_topology, topology_counts):
+    """Canonicalize labels so concordant is AB|C and discordant1 is BC|A.
+
+    Discordant1 is defined as the more frequent discordant topology. If
+    discordant counts tie, keep the base ordering.
+
+    Returns:
+        Tuple ``(canonical_triplet, canonical_counts, canonical_to_original_topology)``
+        where ``canonical_to_original_topology`` maps canonical topology keys
+        (AB/BC/AC) to the source topology keys in the original observation space.
+    """
+    if species_topology == TOPOLOGY_AB:
+        base_arrangement = ("A", "B", "C")
+    elif species_topology == TOPOLOGY_BC:
+        base_arrangement = ("B", "C", "A")
+    elif species_topology == TOPOLOGY_AC:
+        base_arrangement = ("A", "C", "B")
+    else:
+        raise ValueError(f"Invalid species topology: {species_topology}")
+
+    old_taxa = {
+        "A": species_triplet[0],
+        "B": species_triplet[1],
+        "C": species_triplet[2],
+    }
+    canonical_triplet = tuple(old_taxa[label] for label in base_arrangement)
+
+    old_to_new_labels = {
+        old_label: new_label
+        for new_label, old_label in zip(("A", "B", "C"), base_arrangement)
+    }
+    _, canonical_to_original_topology = _build_topology_maps(old_to_new_labels)
+
+    canonical_counts = {
+        topology: int(topology_counts.get(canonical_to_original_topology[topology], 0))
+        for topology in ALL_TOPOLOGIES
+    }
+
+    # Swapping A and B preserves concordant AB|C but swaps BC|A and AC|B.
+    if canonical_counts[TOPOLOGY_AC] > canonical_counts[TOPOLOGY_BC]:
+        canonical_triplet = (canonical_triplet[1], canonical_triplet[0], canonical_triplet[2])
+        canonical_counts[TOPOLOGY_BC], canonical_counts[TOPOLOGY_AC] = (
+            canonical_counts[TOPOLOGY_AC],
+            canonical_counts[TOPOLOGY_BC],
+        )
+        canonical_to_original_topology[TOPOLOGY_BC], canonical_to_original_topology[TOPOLOGY_AC] = (
+            canonical_to_original_topology[TOPOLOGY_AC],
+            canonical_to_original_topology[TOPOLOGY_BC],
+        )
+
+    return canonical_triplet, canonical_counts, canonical_to_original_topology
+
+
 def _species_topology_from_newick(species_tree_newick, abc_triplet):
     """Determine species topology string for an ABC triplet."""
     if not species_tree_newick:
@@ -466,20 +542,25 @@ def _run_triplet_pipeline_from_observations(
 
     topology_counts = {topology: len(heights[topology]) for topology in ALL_TOPOLOGIES}
     analyzed_trees = sum(topology_counts.values())
-    top1_topology, top2_topology, top3_topology = rank_topologies_by_frequency(topology_counts, rng=rng)
+
+    canonical_triplet, canonical_counts, canonical_to_original_topology = _canonicalize_triplet_labels(
+        species_triplet,
+        species_topology,
+        topology_counts,
+    )
+    canonical_heights = {
+        topology: heights[canonical_to_original_topology[topology]]
+        for topology in ALL_TOPOLOGIES
+    }
 
     con_topology, dis1_topology, dis2_topology, most_frequent_matches_concordant = _resolve_topology_roles(
-        topology_counts,
-        species_topology,
+        canonical_counts,
+        TOPOLOGY_AB,
     )
 
-    max_count = max(topology_counts.values())
-    highest_freq_topologies = tuple(
-        topology for topology in ALL_TOPOLOGIES if topology_counts[topology] == max_count
-    )
-    n_con = topology_counts[con_topology]
-    n_dis1 = topology_counts[dis1_topology]
-    n_dis2 = topology_counts[dis2_topology]
+    n_con = canonical_counts[con_topology]
+    n_dis1 = canonical_counts[dis1_topology]
+    n_dis2 = canonical_counts[dis2_topology]
 
     if summary_statistic not in SUMMARY_STATISTIC_CHOICES:
         raise ValueError(
@@ -494,32 +575,21 @@ def _run_triplet_pipeline_from_observations(
         stats_backend=stats_backend,
     )
     dct_significant = dct_p_value <= alpha_dct
-    dct_chi_statistics = dct_statistic if discordant_test == "chi-square" else None
-    dct_z_score = dct_statistic if discordant_test == "z-test" else None
 
     if not dct_significant:
         return TripletPipelineResult(
-            triplet=species_triplet,
+            triplet=canonical_triplet,
             species_tree=species_tree_newick,
-            species_topology=species_topology,
-            dis1_topology=dis1_topology,
-            dis2_topology=dis2_topology,
-            top1_topology=top1_topology,
-            top2_topology=top2_topology,
-            top3_topology=top3_topology,
-            highest_freq_topologies=highest_freq_topologies,
             most_frequent_matches_concordant=most_frequent_matches_concordant,
             n_con=n_con,
             n_dis1=n_dis1,
             n_dis2=n_dis2,
-            dct_chi_statistics=dct_chi_statistics,
-            dct_z_score=dct_z_score,
+            dct_statistic=dct_statistic,
             dct_p_value=dct_p_value,
             dct_significant=False,
             ks_p_value=None,
             ks_statistic=None,
             ks_significant=None,
-            summary_statistic=summary_statistic,
             summary_con=None,
             summary_dis=None,
             classification="no_introgression",
@@ -527,35 +597,26 @@ def _run_triplet_pipeline_from_observations(
         )
 
     ks_statistic, ks_p_value = run_two_sample_ks_test(
-        heights[dis1_topology],
-        heights[con_topology],
+        canonical_heights[dis1_topology],
+        canonical_heights[con_topology],
         stats_backend=stats_backend,
     )
     ks_significant = ks_p_value <= alpha_ks
 
     if not ks_significant:
         return TripletPipelineResult(
-            triplet=species_triplet,
+            triplet=canonical_triplet,
             species_tree=species_tree_newick,
-            species_topology=species_topology,
-            dis1_topology=dis1_topology,
-            dis2_topology=dis2_topology,
-            top1_topology=top1_topology,
-            top2_topology=top2_topology,
-            top3_topology=top3_topology,
-            highest_freq_topologies=highest_freq_topologies,
             most_frequent_matches_concordant=most_frequent_matches_concordant,
             n_con=n_con,
             n_dis1=n_dis1,
             n_dis2=n_dis2,
-            dct_chi_statistics=dct_chi_statistics,
-            dct_z_score=dct_z_score,
+            dct_statistic=dct_statistic,
             dct_p_value=dct_p_value,
             dct_significant=True,
             ks_p_value=ks_p_value,
             ks_statistic=ks_statistic,
             ks_significant=False,
-            summary_statistic=summary_statistic,
             summary_con=None,
             summary_dis=None,
             classification="inflow_introgression",
@@ -563,11 +624,14 @@ def _run_triplet_pipeline_from_observations(
         )
 
     if summary_statistic == "mean":
-        summary_con = _mean(heights[con_topology])
-        summary_dis = _mean(heights[dis1_topology])
+        summary_con = _mean(canonical_heights[con_topology])
+        summary_dis = _mean(canonical_heights[dis1_topology])
+    elif summary_statistic == "mode":
+        summary_con = _mode_binned(canonical_heights[con_topology], decimals=3)
+        summary_dis = _mode_binned(canonical_heights[dis1_topology], decimals=3)
     else:
-        summary_con = _median(heights[con_topology])
-        summary_dis = _median(heights[dis1_topology])
+        summary_con = _median(canonical_heights[con_topology])
+        summary_dis = _median(canonical_heights[dis1_topology])
 
     if summary_con is None or summary_dis is None:
         classification = "unresolved"
@@ -579,27 +643,18 @@ def _run_triplet_pipeline_from_observations(
         classification = "unresolved"
 
     return TripletPipelineResult(
-        triplet=species_triplet,
+        triplet=canonical_triplet,
         species_tree=species_tree_newick,
-        species_topology=species_topology,
-        dis1_topology=dis1_topology,
-        dis2_topology=dis2_topology,
-        top1_topology=top1_topology,
-        top2_topology=top2_topology,
-        top3_topology=top3_topology,
-        highest_freq_topologies=highest_freq_topologies,
         most_frequent_matches_concordant=most_frequent_matches_concordant,
         n_con=n_con,
         n_dis1=n_dis1,
         n_dis2=n_dis2,
-        dct_chi_statistics=dct_chi_statistics,
-        dct_z_score=dct_z_score,
+        dct_statistic=dct_statistic,
         dct_p_value=dct_p_value,
         dct_significant=True,
         ks_p_value=ks_p_value,
         ks_statistic=ks_statistic,
         ks_significant=True,
-        summary_statistic=summary_statistic,
         summary_con=summary_con,
         summary_dis=summary_dis,
         classification=classification,
@@ -619,7 +674,7 @@ def run_triplet_pipeline(
     species_tree_newick=None,
     rng=None,
 ):
-    """Run GhostParser Figure 6 pipeline for one rooted species triplet.
+    """Run GhostParser pipeline for one rooted species triplet.
 
     Args:
         species_triplet: Tuple ``(A, B, C)`` where ``A`` and ``B`` are sisters
@@ -829,35 +884,37 @@ def write_pipeline_statistics_json(results, output_filepath):
         json.dump(data, out_f, indent=2)
 
 
-def write_pipeline_results(results, output_filepath):
+def write_pipeline_results(
+    results,
+    output_filepath,
+    dct_method=DEFAULT_DISCORDANT_TEST,
+    summary_statistic=DEFAULT_SUMMARY_STATISTIC,
+):
     """Write pipeline results to TSV file."""
-    has_chi_statistic = any(result.dct_chi_statistics is not None for result in results)
-    has_z_score = any(result.dct_z_score is not None for result in results)
-    summary_statistics = {result.summary_statistic for result in results}
-
-    if len(summary_statistics) > 1:
+    if dct_method not in DISCORDANT_TEST_CHOICES:
         raise ValueError(
-            "Mixed summary_statistic values in one output are not supported; "
-            "use a single summary_statistic per run"
+            f"Unsupported discordant test method: {dct_method}. "
+            f"Choose one of: {', '.join(DISCORDANT_TEST_CHOICES)}"
         )
 
-    if has_chi_statistic and has_z_score:
+    if summary_statistic not in SUMMARY_STATISTIC_CHOICES:
         raise ValueError(
-            "Mixed discordant-test outputs in one TSV are not supported; "
-            "use a single discordant_test per run"
+            f"Unsupported summary statistic: {summary_statistic}. "
+            f"Choose one of: {', '.join(SUMMARY_STATISTIC_CHOICES)}"
         )
 
-    if has_z_score:
+    if dct_method == "z-test":
         dct_column = "dct_z_score"
     else:
-        dct_column = "dct_chi_statistics"
+        dct_column = "dct_chi_stats"
+
+    summary_con_column = f"{summary_statistic}_con"
+    summary_dis_column = f"{summary_statistic}_dis"
 
     header = [
         "triplet",
+        "abc_mapping",
         "species_tree",
-        "dis1_topology",
-        "dis2_topology",
-        "highest_freq_topologies",
         "n_con",
         "n_dis1",
         "n_dis2",
@@ -867,9 +924,8 @@ def write_pipeline_results(results, output_filepath):
         "ks_statistic",
         "ks_p_value",
         "ks_significant",
-        "summary_statistic",
-        "summary_con",
-        "summary_dis",
+        summary_con_column,
+        summary_dis_column,
         "classification",
         "analyzed_trees",
     ]
@@ -879,12 +935,12 @@ def write_pipeline_results(results, output_filepath):
     with open(output_filepath, "w") as out_f:
         out_f.write("\t".join(header) + "\n")
         for result in results:
+            a_taxon, b_taxon, c_taxon = result.triplet
+            abc_mapping = f"A={a_taxon};B={b_taxon};C={c_taxon}"
             row = [
                 ",".join(result.triplet),
+                abc_mapping,
                 "" if result.species_tree is None else result.species_tree,
-                result.dis1_topology,
-                result.dis2_topology,
-                ",".join(result.highest_freq_topologies),
                 str(result.n_con),
                 str(result.n_dis1),
                 str(result.n_dis2),
@@ -894,17 +950,13 @@ def write_pipeline_results(results, output_filepath):
                 "" if result.ks_statistic is None else f"{result.ks_statistic:.12g}",
                 "" if result.ks_p_value is None else f"{result.ks_p_value:.12g}",
                 "" if result.ks_significant is None else str(result.ks_significant),
-                result.summary_statistic,
                 "" if result.summary_con is None else f"{result.summary_con:.12g}",
                 "" if result.summary_dis is None else f"{result.summary_dis:.12g}",
                 result.classification,
                 str(result.analyzed_trees),
             ]
 
-            if dct_column == "dct_z_score":
-                row.insert(9, "" if result.dct_z_score is None else f"{result.dct_z_score:.12g}")
-            else:
-                row.insert(9, "" if result.dct_chi_statistics is None else f"{result.dct_chi_statistics:.12g}")
+            row.insert(9, f"{result.dct_statistic:.12g}")
 
             out_f.write("\t".join(row) + "\n")
 
@@ -933,7 +985,12 @@ def main():
         use_multiprocessing=not args.no_multiprocessing,
         processes=args.processes,
     )
-    write_pipeline_results(results, str(output_path))
+    write_pipeline_results(
+        results,
+        str(output_path),
+        dct_method=args.discordant_test,
+        summary_statistic=args.summary_statistic,
+    )
 
     stats_output = Path(args.stats_output) if args.stats_output else output_path.with_suffix(".json")
     write_pipeline_statistics_json(results, str(stats_output))

@@ -367,7 +367,12 @@ def main():
                 processes=processes,
             )
             final_tsv = str(output_dir / "orchestrator_triplet_results.tsv")
-            write_pipeline_results(results, final_tsv)
+            write_pipeline_results(
+                results,
+                final_tsv,
+                dct_method=args.discordant_test,
+                summary_statistic=args.summary_statistic,
+            )
 
             inference_time = time.time() - inference_start
             metrics.log("✓ Introgression inference complete")
