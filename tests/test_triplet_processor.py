@@ -168,13 +168,10 @@ def test_run_triplet_pipeline_uses_species_concordant_and_frequency_ranked_disco
         rng=random.Random(0),
     )
 
-    assert result.dis1_topology == TOPOLOGY_BC
-    assert result.dis2_topology == TOPOLOGY_AC
+    assert result.triplet == species_triplet
     assert result.n_con == 8
     assert result.n_dis1 == 12
     assert result.n_dis2 == 4
-    assert result.top1_topology == TOPOLOGY_BC
-    assert TOPOLOGY_BC in result.highest_freq_topologies
     assert result.most_frequent_matches_concordant is False
 
 
@@ -191,8 +188,7 @@ def test_run_triplet_pipeline_supports_z_test_for_discordant_counts():
 
     assert result.dct_significant is True
     assert result.dct_p_value < 0.01
-    assert result.dct_z_score is not None
-    assert result.dct_chi_statistics is None
+    assert result.dct_statistic is not None
 
 
 def test_run_triplet_pipeline_supports_standard_stats_backend():
@@ -207,8 +203,7 @@ def test_run_triplet_pipeline_supports_standard_stats_backend():
         stats_backend="standard",
     )
 
-    assert result.dct_chi_statistics is not None
-    assert result.dct_z_score is None
+    assert result.dct_statistic is not None
 
 
 @pytest.mark.reference
@@ -254,7 +249,6 @@ def test_run_triplet_pipeline_supports_median_summary_statistic():
         summary_statistic="median",
     )
 
-    assert result.summary_statistic == "median"
     assert result.summary_con is not None
     assert result.summary_dis is not None
 
@@ -269,10 +263,26 @@ def test_run_triplet_pipeline_breaks_discordant_ties_by_first_topology():
         species_topology=TOPOLOGY_AB,
     )
 
-    assert result.dis1_topology == TOPOLOGY_BC
-    assert result.dis2_topology == TOPOLOGY_AC
+    assert result.triplet == species_triplet
     assert result.n_dis1 == 3
     assert result.n_dis2 == 3
+
+
+def test_run_triplet_pipeline_relabels_a_b_when_ac_is_more_frequent_discordant():
+    species_triplet = ("A", "B", "C")
+    trees = (["((A:1,B:1):1,C:1);"] * 8) + (["((A:1,C:1):1,B:1);"] * 12) + (["((B:1,C:1):1,A:1);"] * 4)
+
+    result = run_triplet_pipeline(
+        species_triplet,
+        trees,
+        species_topology=TOPOLOGY_AB,
+    )
+
+    # Labels are reassigned so dis1 is always BC|A after canonicalization.
+    assert result.triplet == ("B", "A", "C")
+    assert result.n_con == 8
+    assert result.n_dis1 == 12
+    assert result.n_dis2 == 4
 
 
 def test_run_triplet_pipeline_no_introgression_when_dct_not_significant():
@@ -356,12 +366,12 @@ def test_parse_analyze_and_write_pipeline_roundtrip_with_species_header(tmp_path
     assert len(results) == 1
 
     output_file = tmp_path / "triplet_introgression_results.tsv"
-    write_pipeline_results(results, str(output_file))
+    write_pipeline_results(results, str(output_file), dct_method="chi-square")
 
     out = output_file.read_text()
     assert "species_tree" in out
     assert "most_frequent_matches_concordant" in out
-    assert "dct_chi_statistics" in out
+    assert "dct_chi_stats" in out
     assert "dct_z_score" not in out
     assert "A,B,C" in out
 
@@ -411,7 +421,22 @@ def test_analyze_triplet_gene_tree_file_rejects_unknown_summary_statistic(tmp_pa
     input_file.write_text(content)
 
     with pytest.raises(ValueError, match="Unsupported summary statistic"):
-        analyze_triplet_gene_tree_file(str(input_file), summary_statistic="mode")
+        analyze_triplet_gene_tree_file(str(input_file), summary_statistic="bad-summary")
+
+
+def test_run_triplet_pipeline_supports_mode_summary_statistic():
+    species_triplet = ("A", "B", "C")
+    trees = (["((A:0.2,B:0.2):0.3,C:0.5);"] * 40) + (["((B:1.0,C:1.0):2.0,A:3.0);"] * 30) + (["((A:0.2,C:0.2):0.3,B:0.5);"] * 5)
+
+    result = run_triplet_pipeline(
+        species_triplet,
+        trees,
+        species_topology=TOPOLOGY_AB,
+        summary_statistic="mode",
+    )
+
+    assert result.summary_con is not None
+    assert result.summary_dis is not None
 
 
 def test_analyze_triplet_gene_tree_file_rejects_unknown_stats_backend(tmp_path):
@@ -476,30 +501,42 @@ def test_parse_triplet_gene_trees_file_rejects_empty_species_tree(tmp_path):
         parse_triplet_gene_trees_file(str(input_file))
 
 
-def test_write_pipeline_results_includes_topology_columns(tmp_path):
+def test_write_pipeline_results_omits_removed_topology_columns(tmp_path):
     species_triplet = ("A", "B", "C")
     trees = (["((B:1,C:1):1,A:1);"] * 10) + (["((A:1,B:1):1,C:1);"] * 8) + (["((A:1,C:1):1,B:1);"] * 2)
     result = run_triplet_pipeline(species_triplet, trees, species_topology=TOPOLOGY_AB, rng=random.Random(6))
 
     output_file = tmp_path / "results.tsv"
-    write_pipeline_results([result], str(output_file))
+    write_pipeline_results([result], str(output_file), dct_method="chi-square")
 
     out = output_file.read_text()
-    assert "dis1_topology" in out
-    assert "dis2_topology" in out
+    assert "dis1_topology" not in out
+    assert "dis2_topology" not in out
+    assert "highest_freq_topologies" not in out
+    assert "n_dis1" in out
+    assert "n_dis2" in out
 
 
-def test_write_pipeline_results_marks_discordant_highest_freq(tmp_path):
+def test_write_pipeline_results_uses_dynamic_summary_column_names(tmp_path):
     species_triplet = ("A", "B", "C")
-    trees = (["((B:1,C:1):1,A:1);"] * 12) + (["((A:1,B:1):1,C:1);"] * 8) + (["((A:1,C:1):1,B:1);"] * 2)
-    result = run_triplet_pipeline(species_triplet, trees, species_topology=TOPOLOGY_AB, rng=random.Random(9))
+    trees = (["((A:1.0,B:1.0):2.0,C:3.0);"] * 40) + (["((B:0.2,C:0.2):0.3,A:0.5);"] * 30) + (["((A:0.2,C:0.2):0.3,B:0.5);"] * 5)
+    result = run_triplet_pipeline(
+        species_triplet,
+        trees,
+        species_topology=TOPOLOGY_AB,
+        summary_statistic="median",
+        rng=random.Random(9),
+    )
 
-    output_file = tmp_path / "results_highest_freq.tsv"
-    write_pipeline_results([result], str(output_file))
+    output_file = tmp_path / "results_dynamic_summary.tsv"
+    write_pipeline_results([result], str(output_file), dct_method="chi-square")
 
-    out = output_file.read_text()
-    assert "((B,C),A)" in out
-    assert "highest_freq_topologies" in out
+    header = output_file.read_text().splitlines()[0]
+    assert "median_con" in header
+    assert "median_dis" in header
+    assert "summary_statistic" not in header
+    assert "summary_con" not in header
+    assert "summary_dis" not in header
 
 
 def test_collect_triplet_statistics_returns_dict_list():
@@ -512,13 +549,13 @@ def test_collect_triplet_statistics_returns_dict_list():
     assert len(stats) == 1
     assert stats[0]["triplet"] == species_triplet
     assert "most_frequent_matches_concordant" in stats[0]
-    assert "topology_frequency_ranking" in stats[0]
-    assert "highest_freq_topologies" in stats[0]
-    assert "dct_chi_statistics" in stats[0]
-    assert "dct_z_score" in stats[0]
+    assert "species_topology" not in stats[0]
+    assert "dct_method" not in stats[0]
+    assert "dct_statistic" in stats[0]
+    assert "summary_statistic" not in stats[0]
 
 
-def test_write_pipeline_results_uses_dct_chi_statistic_column_for_chi_square(tmp_path):
+def test_write_pipeline_results_uses_dct_chi_stats_column_for_chi_square(tmp_path):
     species_triplet = ("A", "B", "C")
     trees = (["((B:1,C:1):1,A:1);"] * 12) + (["((A:1,B:1):1,C:1);"] * 8) + (["((A:1,C:1):1,B:1);"] * 2)
     result = run_triplet_pipeline(
@@ -530,14 +567,16 @@ def test_write_pipeline_results_uses_dct_chi_statistic_column_for_chi_square(tmp
     )
 
     output_file = tmp_path / "results_chi.tsv"
-    write_pipeline_results([result], str(output_file))
+    write_pipeline_results([result], str(output_file), dct_method="chi-square")
 
     lines = output_file.read_text().splitlines()
     header = lines[0].split("\t")
     row = lines[1].split("\t")
 
-    chi_idx = header.index("dct_chi_statistics")
+    chi_idx = header.index("dct_chi_stats")
     assert "dct_z_score" not in header
+    assert "median_con" in header
+    assert "median_dis" in header
 
     assert row[chi_idx] != ""
 
@@ -554,16 +593,58 @@ def test_write_pipeline_results_uses_dct_z_score_column_for_z_test(tmp_path):
     )
 
     output_file = tmp_path / "results_z.tsv"
-    write_pipeline_results([result], str(output_file))
+    write_pipeline_results([result], str(output_file), dct_method="z-test", summary_statistic="median")
 
     lines = output_file.read_text().splitlines()
     header = lines[0].split("\t")
     row = lines[1].split("\t")
 
-    assert "dct_chi_statistics" not in header
+    assert "dct_chi_stats" not in header
     z_idx = header.index("dct_z_score")
+    assert "median_con" in header
+    assert "median_dis" in header
 
     assert row[z_idx] != ""
+
+
+def test_write_pipeline_results_uses_mode_summary_columns_for_mode(tmp_path):
+    species_triplet = ("A", "B", "C")
+    trees = (["((A:0.2,B:0.2):0.3,C:0.5);"] * 40) + (["((B:1.0,C:1.0):2.0,A:3.0);"] * 30) + (["((A:0.2,C:0.2):0.3,B:0.5);"] * 5)
+    result = run_triplet_pipeline(
+        species_triplet,
+        trees,
+        species_topology=TOPOLOGY_AB,
+        summary_statistic="mode",
+        rng=random.Random(31),
+    )
+
+    output_file = tmp_path / "results_mode.tsv"
+    write_pipeline_results([result], str(output_file), dct_method="chi-square", summary_statistic="mode")
+
+    header = output_file.read_text().splitlines()[0]
+    assert "mode_con" in header
+    assert "mode_dis" in header
+
+
+def test_write_pipeline_results_includes_abc_mapping_column(tmp_path):
+    species_triplet = ("TaxonA", "TaxonB", "TaxonC")
+    trees = ["((TaxonA:1,TaxonB:1):1,TaxonC:1);"] * 6
+    result = run_triplet_pipeline(
+        species_triplet,
+        trees,
+        species_topology=TOPOLOGY_AB,
+        rng=random.Random(33),
+    )
+
+    output_file = tmp_path / "results_abc.tsv"
+    write_pipeline_results([result], str(output_file), dct_method="chi-square", summary_statistic="median")
+
+    lines = output_file.read_text().splitlines()
+    header = lines[0].split("\t")
+    row = lines[1].split("\t")
+
+    mapping_idx = header.index("abc_mapping")
+    assert row[mapping_idx] == "A=TaxonA;B=TaxonB;C=TaxonC"
 
 
 def test_write_pipeline_statistics_json(tmp_path):
@@ -575,8 +656,8 @@ def test_write_pipeline_statistics_json(tmp_path):
     write_pipeline_statistics_json([result], str(output_file))
 
     out = output_file.read_text()
-    assert "dct_chi_statistics" in out
-    assert "dct_z_score" in out
+    assert "dct_method" not in out
+    assert "dct_statistic" in out
     assert "classification" in out
 
 
@@ -600,32 +681,26 @@ def test_write_pipeline_results_rejects_mixed_discordant_test_outputs(tmp_path):
     )
 
     output_file = tmp_path / "mixed_dct.tsv"
-    with pytest.raises(ValueError, match="Mixed discordant-test outputs"):
-        write_pipeline_results([chi_result, z_result], str(output_file))
+    # Writer column selection now comes from supplied config method.
+    with pytest.raises(ValueError, match="Unsupported discordant test method"):
+        write_pipeline_results([chi_result, z_result], str(output_file), dct_method="bad-test")
 
 
-def test_write_pipeline_results_rejects_mixed_summary_statistics(tmp_path):
+def test_write_pipeline_results_rejects_unsupported_summary_statistic(tmp_path):
     species_triplet = ("A", "B", "C")
     trees = (["((B:1,C:1):1,A:1);"] * 12) + (["((A:1,B:1):1,C:1);"] * 8) + (["((A:1,C:1):1,B:1);"] * 2)
 
-    median_result = run_triplet_pipeline(
+    result = run_triplet_pipeline(
         species_triplet,
         trees,
         species_topology=TOPOLOGY_AB,
         summary_statistic="median",
         rng=random.Random(22),
     )
-    mean_result = run_triplet_pipeline(
-        species_triplet,
-        trees,
-        species_topology=TOPOLOGY_AB,
-        summary_statistic="mean",
-        rng=random.Random(23),
-    )
 
     output_file = tmp_path / "mixed_summary.tsv"
-    with pytest.raises(ValueError, match="Mixed summary_statistic values"):
-        write_pipeline_results([median_result, mean_result], str(output_file))
+    with pytest.raises(ValueError, match="Unsupported summary statistic"):
+        write_pipeline_results([result], str(output_file), dct_method="chi-square", summary_statistic="bad-summary")
 
 
 def test_resolve_runtime_args_triplet_processor_cli_defaults():
